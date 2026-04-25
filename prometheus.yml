@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: clickhouse
+    static_configs:
+      - targets:
+          - clickhouse-s1r1:8123
+          - clickhouse-s1r2:8123
+          - clickhouse-s2r1:8123
+          - clickhouse-s2r2:8123
+    metrics_path: /metrics

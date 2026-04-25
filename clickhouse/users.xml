@@ -1,0 +1,98 @@
+<clickhouse>
+    <profiles>
+        <!-- Admin: full access, high resource limits -->
+        <admin>
+            <max_memory_usage>10000000000</max_memory_usage>
+            <max_execution_time>300</max_execution_time>
+            <max_threads>16</max_threads>
+            <readonly>0</readonly>
+        </admin>
+
+        <!-- Analyst: read-only, moderate limits -->
+        <analyst>
+            <max_memory_usage>4000000000</max_memory_usage>
+            <max_execution_time>60</max_execution_time>
+            <max_threads>8</max_threads>
+            <readonly>1</readonly>
+        </analyst>
+
+        <!-- Agent (untrusted): minimal limits — this is the profile
+             defenses should protect. The benchmark tests what happens
+             when these limits are insufficient or absent. -->
+        <agent_untrusted>
+            <max_memory_usage>2000000000</max_memory_usage>
+            <max_execution_time>30</max_execution_time>
+            <max_threads>4</max_threads>
+            <max_result_rows>100000</max_result_rows>
+            <max_result_bytes>100000000</max_result_bytes>
+            <readonly>1</readonly>
+        </agent_untrusted>
+
+        <!-- Agent (no guardrails): same as admin — baseline for
+             measuring how bad things get without protection -->
+        <agent_unrestricted>
+            <max_memory_usage>10000000000</max_memory_usage>
+            <max_execution_time>300</max_execution_time>
+            <max_threads>16</max_threads>
+            <readonly>0</readonly>
+        </agent_unrestricted>
+    </profiles>
+
+    <users>
+        <default>
+            <password></password>
+            <profile>admin</profile>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <quota>default</quota>
+            <access_management>1</access_management>
+        </default>
+
+        <analyst>
+            <password>analyst_pass</password>
+            <profile>analyst</profile>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <quota>default</quota>
+            <allow_databases>
+                <database>sao</database>
+            </allow_databases>
+        </analyst>
+
+        <agent>
+            <password>agent_pass</password>
+            <profile>agent_untrusted</profile>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <quota>default</quota>
+            <allow_databases>
+                <database>sao</database>
+            </allow_databases>
+        </agent>
+
+        <agent_unrestricted>
+            <password>agent_unrestricted_pass</password>
+            <profile>agent_unrestricted</profile>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <quota>default</quota>
+        </agent_unrestricted>
+    </users>
+
+    <quotas>
+        <default>
+            <interval>
+                <duration>3600</duration>
+                <queries>0</queries>
+                <errors>0</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>0</execution_time>
+            </interval>
+        </default>
+    </quotas>
+</clickhouse>

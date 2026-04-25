@@ -1,0 +1,135 @@
+version: "3.8"
+
+# SAO Benchmark Harness — Distributed ClickHouse OLAP cluster
+# Simulates a production-grade distributed analytics system
+# that AI agents interact with (and potentially abuse).
+
+x-clickhouse-common: &clickhouse-common
+  image: clickhouse/clickhouse-server:24.8
+  ulimits:
+    nofile:
+      soft: 262144
+      hard: 262144
+  healthcheck:
+    test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+  networks:
+    - sao-net
+
+services:
+  # --- ZooKeeper for ClickHouse cluster coordination ---
+  zookeeper:
+    image: zookeeper:3.9
+    hostname: zookeeper
+    environment:
+      ZOO_MY_ID: 1
+    ports:
+      - "2181:2181"
+    networks:
+      - sao-net
+    healthcheck:
+      test: ["CMD", "zkServer.sh", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # --- Shard 1, Replica 1 (primary entry point) ---
+  clickhouse-s1r1:
+    <<: *clickhouse-common
+    hostname: clickhouse-s1r1
+    ports:
+      - "8123:8123"   # HTTP
+      - "9000:9000"   # Native
+    volumes:
+      - ./clickhouse/config.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/users.xml:ro
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ch-s1r1-data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_SHARD: "1"
+      CLICKHOUSE_REPLICA: "s1r1"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+
+  # --- Shard 1, Replica 2 ---
+  clickhouse-s1r2:
+    <<: *clickhouse-common
+    hostname: clickhouse-s1r2
+    ports:
+      - "8124:8123"
+      - "9001:9000"
+    volumes:
+      - ./clickhouse/config.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/users.xml:ro
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ch-s1r2-data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_SHARD: "1"
+      CLICKHOUSE_REPLICA: "s1r2"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+
+  # --- Shard 2, Replica 1 ---
+  clickhouse-s2r1:
+    <<: *clickhouse-common
+    hostname: clickhouse-s2r1
+    ports:
+      - "8125:8123"
+      - "9002:9000"
+    volumes:
+      - ./clickhouse/config.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/users.xml:ro
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ch-s2r1-data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_SHARD: "2"
+      CLICKHOUSE_REPLICA: "s2r1"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+
+  # --- Shard 2, Replica 2 ---
+  clickhouse-s2r2:
+    <<: *clickhouse-common
+    hostname: clickhouse-s2r2
+    ports:
+      - "8126:8123"
+      - "9003:9000"
+    volumes:
+      - ./clickhouse/config.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/users.xml:ro
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ch-s2r2-data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_SHARD: "2"
+      CLICKHOUSE_REPLICA: "s2r2"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+
+  # --- Prometheus for metrics collection ---
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    hostname: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - sao-net
+    depends_on:
+      - clickhouse-s1r1
+
+volumes:
+  ch-s1r1-data:
+  ch-s1r2-data:
+  ch-s2r1-data:
+  ch-s2r2-data:
+
+networks:
+  sao-net:
+    driver: bridge
