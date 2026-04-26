@@ -1,0 +1,217 @@
+# Resource Registry: classifies tables and columns by sensitivity level
+# Used by the Access Control Service to enforce intent-based policies.
+
+databases:
+  sao:
+    tables:
+      customers:
+        classification: PII
+        description: "Customer dimension table with personal identifiable information"
+        columns:
+          customer_id:
+            classification: SAFE
+            description: "Unique customer identifier"
+          email:
+            classification: PII
+            description: "Customer email address"
+          full_name:
+            classification: PII
+            description: "Customer full legal name"
+          phone:
+            classification: PII
+            description: "Customer phone number"
+          ssn_hash:
+            classification: PII
+            description: "Hashed Social Security Number"
+          credit_score:
+            classification: FINANCIAL
+            description: "Customer credit score (300-850)"
+          address:
+            classification: PII
+            description: "Street address"
+          city:
+            classification: SAFE
+            description: "City of residence"
+          state:
+            classification: SAFE
+            description: "State/province"
+          zip_code:
+            classification: LOCATION
+            description: "ZIP/postal code"
+          country:
+            classification: SAFE
+            description: "Country"
+          tier:
+            classification: SAFE
+            description: "Subscription tier (free/premium/enterprise)"
+          created_at:
+            classification: SAFE
+            description: "Account creation timestamp"
+          updated_at:
+            classification: SAFE
+            description: "Last profile update timestamp"
+
+      transactions:
+        classification: FINANCIAL
+        description: "High-volume transactional fact table for revenue analytics"
+        columns:
+          tx_id:
+            classification: SAFE
+            description: "Unique transaction identifier"
+          customer_id:
+            classification: SAFE
+            description: "Foreign key to customers table"
+          product_id:
+            classification: SAFE
+            description: "Foreign key to products table"
+          category:
+            classification: SAFE
+            description: "Product category"
+          amount_cents:
+            classification: FINANCIAL
+            description: "Transaction amount in cents"
+          currency:
+            classification: SAFE
+            description: "Currency code (USD, EUR, etc.)"
+          payment_method:
+            classification: SAFE
+            description: "Payment method used (credit_card, debit, etc.)"
+          card_last4:
+            classification: PII
+            description: "Last 4 digits of payment card"
+          ip_address:
+            classification: PII
+            description: "Client IP address"
+          user_agent:
+            classification: SAFE
+            description: "HTTP user agent string"
+          status:
+            classification: SAFE
+            description: "Transaction status (pending/completed/refunded/fraud)"
+          fraud_score:
+            classification: BUSINESS_SECRET
+            description: "Internal fraud risk model output (0.0-1.0)"
+          created_at:
+            classification: SAFE
+            description: "Transaction creation timestamp"
+          processed_at:
+            classification: SAFE
+            description: "Transaction processing timestamp"
+
+      products:
+        classification: BUSINESS_SECRET
+        description: "Product catalog with pricing and cost data"
+        columns:
+          product_id:
+            classification: SAFE
+            description: "Unique product identifier"
+          name:
+            classification: SAFE
+            description: "Product display name"
+          category:
+            classification: SAFE
+            description: "Product category"
+          price_cents:
+            classification: SAFE
+            description: "Retail price in cents"
+          cost_cents:
+            classification: BUSINESS_SECRET
+            description: "Internal cost in cents — reveals margins"
+          supplier_id:
+            classification: BUSINESS_SECRET
+            description: "Supplier identifier — reveals supply chain"
+          is_active:
+            classification: SAFE
+            description: "Whether the product is currently active"
+          created_at:
+            classification: SAFE
+            description: "Product creation timestamp"
+
+      revenue_daily:
+        classification: SAFE_AGGREGATE
+        description: "Pre-aggregated daily revenue metrics — safe for agent consumption"
+        columns:
+          dt:
+            classification: SAFE
+            description: "Calendar date"
+          category:
+            classification: SAFE
+            description: "Product category"
+          total_amount:
+            classification: SAFE
+            description: "Sum of transaction amounts in cents for the day"
+          tx_count:
+            classification: SAFE
+            description: "Number of transactions for the day"
+          avg_amount:
+            classification: SAFE
+            description: "Average transaction amount in cents"
+          refund_count:
+            classification: SAFE
+            description: "Number of refunded transactions"
+
+      agent_audit_log:
+        classification: SYSTEM
+        description: "Audit log of agent queries — system-internal"
+        columns:
+          log_id:
+            classification: SYSTEM
+            description: "Audit log entry ID"
+          agent_id:
+            classification: SYSTEM
+            description: "Agent identifier"
+          query_text:
+            classification: SYSTEM
+            description: "The SQL query that was executed"
+          query_hash:
+            classification: SYSTEM
+            description: "Hash of the query text"
+          tables_accessed:
+            classification: SYSTEM
+            description: "Tables referenced in the query"
+          columns_accessed:
+            classification: SYSTEM
+            description: "Columns referenced in the query"
+          rows_read:
+            classification: SYSTEM
+            description: "Number of rows read"
+          bytes_read:
+            classification: SYSTEM
+            description: "Number of bytes read"
+          execution_time_ms:
+            classification: SYSTEM
+            description: "Query execution time in milliseconds"
+          was_blocked:
+            classification: SYSTEM
+            description: "Whether the query was blocked by access control"
+          block_reason:
+            classification: SYSTEM
+            description: "Reason the query was blocked"
+          created_at:
+            classification: SYSTEM
+            description: "Audit log entry timestamp"
+
+# Sensitivity hierarchy (most to least restrictive):
+# PII > FINANCIAL > BUSINESS_SECRET > SYSTEM > LOCATION > SAFE_AGGREGATE > SAFE
+sensitivity_levels:
+  PII:
+    level: 7
+    description: "Personally Identifiable Information — never expose at row level"
+  FINANCIAL:
+    level: 6
+    description: "Financial data — aggregations only"
+  BUSINESS_SECRET:
+    level: 5
+    description: "Internal business metrics — restricted access"
+  SYSTEM:
+    level: 4
+    description: "System/infrastructure metadata — admin only"
+  LOCATION:
+    level: 3
+    description: "Location data — may reveal identity when combined"
+  SAFE_AGGREGATE:
+    level: 1
+    description: "Pre-aggregated data — safe for all agents"
+  SAFE:
+    level: 0
+    description: "Non-sensitive data — unrestricted"

@@ -1,0 +1,62 @@
+# Semantic Metadata: human-readable descriptions and enrichments
+# for the /explore endpoint. Supplements what ClickHouse's
+# system.columns provides with semantic meaning.
+
+databases:
+  sao:
+    description: "E-commerce analytics data warehouse for a mid-size online retailer"
+    domain: "retail / e-commerce"
+    tables:
+      customers:
+        description: "Customer dimension table — demographics, subscription tier, and location"
+        business_context: "One row per registered customer. Updated when profile changes."
+        recommended_joins:
+          - target: transactions
+            key: customer_id
+            relationship: "one-to-many"
+            description: "Join to see a customer's purchase history"
+        sample_queries:
+          - sql: "SELECT tier, COUNT(*) FROM sao.customers_distributed GROUP BY tier"
+            description: "Count customers by subscription tier"
+          - sql: "SELECT state, COUNT(*) FROM sao.customers_distributed GROUP BY state ORDER BY COUNT(*) DESC LIMIT 10"
+            description: "Top 10 states by customer count"
+
+      transactions:
+        description: "Transactional fact table — every purchase, refund, and pending order"
+        business_context: "High-volume append-only table. ~2M rows in the default dataset."
+        recommended_joins:
+          - target: customers
+            key: customer_id
+            relationship: "many-to-one"
+            description: "Join to enrich transactions with customer demographics"
+          - target: products
+            key: product_id
+            relationship: "many-to-one"
+            description: "Join to get product details for each transaction"
+        sample_queries:
+          - sql: "SELECT category, SUM(amount_cents)/100 as revenue_usd FROM sao.transactions_distributed WHERE status = 'completed' GROUP BY category"
+            description: "Total revenue by product category"
+          - sql: "SELECT toDate(created_at) as dt, COUNT(*) FROM sao.transactions_distributed GROUP BY dt ORDER BY dt"
+            description: "Daily transaction volume over time"
+
+      products:
+        description: "Product catalog — names, categories, pricing"
+        business_context: "Slowly-changing dimension. ~5000 products."
+        sample_queries:
+          - sql: "SELECT category, COUNT(*), AVG(price_cents)/100 as avg_price FROM sao.products_distributed GROUP BY category"
+            description: "Product count and average price by category"
+
+      revenue_daily:
+        description: "Pre-aggregated daily revenue metrics — recommended starting point for revenue analysis"
+        business_context: "Materialized from transactions. Updated daily. No PII."
+        sample_queries:
+          - sql: "SELECT dt, SUM(total_amount)/100 as revenue_usd FROM sao.revenue_daily_distributed GROUP BY dt ORDER BY dt"
+            description: "Daily total revenue"
+          - sql: "SELECT category, SUM(tx_count) as total_orders, SUM(total_amount)/100 as total_revenue FROM sao.revenue_daily_distributed GROUP BY category ORDER BY total_revenue DESC"
+            description: "Revenue and order volume by category"
+          - sql: "SELECT dt, SUM(refund_count) as refunds, SUM(tx_count) as orders, refunds/orders as refund_rate FROM sao.revenue_daily_distributed GROUP BY dt ORDER BY dt"
+            description: "Daily refund rate"
+
+      agent_audit_log:
+        description: "Internal audit log of agent queries — not accessible to agents"
+        business_context: "System table for observability. Agents should not query this."

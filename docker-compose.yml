@@ -5,7 +5,7 @@ version: "3.8"
 # that AI agents interact with (and potentially abuse).
 
 x-clickhouse-common: &clickhouse-common
-  image: clickhouse/clickhouse-server:24.8
+  image: artprod.dev.bloomberg.com/tsaimpm/clickhouse:24.8
   ulimits:
     nofile:
       soft: 262144
@@ -21,7 +21,7 @@ x-clickhouse-common: &clickhouse-common
 services:
   # --- ZooKeeper for ClickHouse cluster coordination ---
   zookeeper:
-    image: zookeeper:3.9
+    image: artprod.dev.bloomberg.com/tsaimpm/zookeeper:3.9
     hostname: zookeeper
     environment:
       ZOO_MY_ID: 1
@@ -113,7 +113,7 @@ services:
 
   # --- Prometheus for metrics collection ---
   prometheus:
-    image: prom/prometheus:v2.51.0
+    image: artprod.dev.bloomberg.com/tsaimpm/prometheus:2.51.0
     hostname: prometheus
     ports:
       - "9090:9090"
@@ -124,11 +124,50 @@ services:
     depends_on:
       - clickhouse-s1r1
 
+  # --- Agent-First Middleware ---
+  middleware:
+    build: ./middleware
+    hostname: middleware
+    ports:
+      - "8080:8080"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse-s1r1
+      - CLICKHOUSE_PORT=8123
+      - VECTOR_DB_HOST=vector-db
+      - VECTOR_DB_PORT=8000
+      # Embedding API configuration (opt-in: leave empty to use local trigram hash)
+      # Set EMBEDDING_API_URL to an OpenAI-compatible endpoint to use real embeddings.
+      # Examples: http://ollama:11434/v1  or  https://api.openai.com/v1
+      - EMBEDDING_API_URL=
+      - EMBEDDING_API_KEY=
+      - EMBEDDING_MODEL=
+    networks:
+      - sao-net
+    depends_on:
+      clickhouse-s1r1:
+        condition: service_healthy
+      vector-db:
+        condition: service_started
+
+  # --- ChromaDB for session embedding storage ---
+  vector-db:
+    image: artprod.dev.bloomberg.com/tsaimpm/chromadb:latest
+    hostname: vector-db
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+    networks:
+      - sao-net
+    environment:
+      - IS_PERSISTENT=TRUE
+
 volumes:
   ch-s1r1-data:
   ch-s1r2-data:
   ch-s2r1-data:
   ch-s2r2-data:
+  chroma-data:
 
 networks:
   sao-net:

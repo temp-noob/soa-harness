@@ -1,0 +1,91 @@
+# Access Control Policies
+# Maps agent roles to what they can and cannot do.
+
+roles:
+  agent_basic:
+    description: "Default agent role — restricted to safe data only"
+    rules:
+      - effect: DENY
+        resource_type: table
+        classifications: [SYSTEM]
+        reason: "System tables are not accessible to agents"
+
+      - effect: DENY
+        resource_type: column
+        classifications: [PII]
+        query_types: [SELECT_ROW]
+        reason: "Row-level PII access is prohibited"
+
+      - effect: DENY
+        resource_type: column
+        classifications: [FINANCIAL]
+        query_types: [SELECT_ROW]
+        reason: "Row-level financial data access is prohibited"
+
+      - effect: DENY
+        resource_type: column
+        classifications: [BUSINESS_SECRET]
+        query_types: [SELECT_ROW]
+        reason: "Row-level business secret access is prohibited"
+
+      - effect: ALLOW
+        resource_type: column
+        classifications: [FINANCIAL, BUSINESS_SECRET]
+        query_types: [AGGREGATE]
+        reason: "Aggregations over financial/business data are allowed"
+
+      - effect: DENY
+        resource_type: query
+        query_types: [DDL, DML, SYSTEM_CMD]
+        reason: "Write operations and system commands are prohibited"
+
+      - effect: ALLOW
+        resource_type: table
+        classifications: [SAFE_AGGREGATE, SAFE]
+        query_types: [SELECT_ROW, AGGREGATE]
+        reason: "Full access to safe and pre-aggregated tables"
+
+  agent_analytics:
+    description: "Analytics agent — can aggregate over sensitive data"
+    rules:
+      - effect: DENY
+        resource_type: table
+        classifications: [SYSTEM]
+        reason: "System tables are not accessible"
+
+      - effect: DENY
+        resource_type: column
+        classifications: [PII]
+        query_types: [SELECT_ROW]
+        reason: "Row-level PII access is prohibited"
+
+      - effect: ALLOW
+        resource_type: column
+        classifications: [PII]
+        query_types: [AGGREGATE]
+        conditions:
+          min_group_size: 5
+        reason: "Aggregations over PII allowed with k-anonymity (k>=5)"
+
+      - effect: ALLOW
+        resource_type: column
+        classifications: [FINANCIAL, BUSINESS_SECRET]
+        query_types: [SELECT_ROW, AGGREGATE]
+        reason: "Full access to financial and business data"
+
+      - effect: DENY
+        resource_type: query
+        query_types: [DDL, DML, SYSTEM_CMD]
+        reason: "Write operations and system commands are prohibited"
+
+  admin:
+    description: "Full access — for benchmark baseline testing"
+    rules:
+      - effect: ALLOW
+        resource_type: any
+        classifications: [any]
+        query_types: [any]
+        reason: "Admin has unrestricted access"
+
+# Default role assigned when agent_id is not recognized
+default_role: agent_basic

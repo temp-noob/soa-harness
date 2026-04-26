@@ -1,11 +1,12 @@
-.PHONY: up down reset load bench bench-unrestricted bench-analyst clean logs help
+.PHONY: up down reset load bench bench-unrestricted bench-analyst clean logs help middleware-build middleware-logs middleware-test
 
 # -------------------------------------------------------------------
 # SAO Benchmark Harness — Makefile
 # -------------------------------------------------------------------
 
 COMPOSE := docker compose
-PYTHON  := python3
+VENV := python -m venv .venv
+PYTHON  := $(VENV)/bin/python
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -14,6 +15,7 @@ help: ## Show this help
 # --- Infrastructure ---
 
 up: ## Start the ClickHouse cluster + Prometheus
+
 	$(COMPOSE) up -d
 	@echo "Waiting for cluster to be healthy..."
 	@sleep 10
@@ -31,7 +33,7 @@ reset: down ## Destroy volumes and restart fresh
 # --- Data ---
 
 install-deps: ## Install Python dependencies
-	pip install -r requirements.txt
+	$(PYTHON) -m pip install -r requirements.txt
 
 load: ## Generate and load synthetic data (50k customers, 2M transactions)
 	$(PYTHON) generate_data.py --host localhost --port 8123
@@ -80,6 +82,37 @@ query-log: ## Show recent queries from the audit perspective
 		 FROM system.query_log \
 		 WHERE event_time > now() - INTERVAL 10 MINUTE \
 		 ORDER BY event_time DESC LIMIT 30 FORMAT PrettyCompact"
+
+# --- Middleware ---
+
+middleware-build: ## Build the middleware container
+	$(COMPOSE) build middleware
+
+middleware-logs: ## Tail middleware logs
+	$(COMPOSE) logs -f middleware
+
+middleware-test: ## Test middleware health and explore endpoint
+	@echo "=== Health Check ==="
+	@curl -s http://localhost:8080/health && echo ""
+	@echo ""
+	@echo "=== Explore Endpoint (as agent) ==="
+	@curl -s "http://localhost:8080/explore?agent_id=agent" && echo ""
+	@echo ""
+	@echo "=== Access Control: DENY PII row access ==="
+	@curl -s -X POST http://localhost:8080/query \
+		-H "Content-Type: application/json" \
+		-d '{"sql": "SELECT email, full_name FROM sao.customers LIMIT 10", "agent_id": "agent"}' \
+		&& echo ""
+	@echo ""
+	@echo "=== Access Control: ALLOW aggregation ==="
+	@curl -s -X POST http://localhost:8080/query \
+		-H "Content-Type: application/json" \
+		-d '{"sql": "SELECT tier, COUNT(*) FROM sao.customers_distributed GROUP BY tier", "agent_id": "agent"}' \
+		&& echo ""
+
+bench-middleware: ## Run all scenarios through the middleware (port 8080)
+	$(PYTHON) harness.py --profile agent --host localhost --port 8080 \
+		--output reports/middleware_agent_results.json
 
 clean: ## Remove report files
 	rm -rf reports/*.json
