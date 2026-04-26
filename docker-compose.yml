@@ -5,7 +5,7 @@ version: "3.8"
 # that AI agents interact with (and potentially abuse).
 
 x-clickhouse-common: &clickhouse-common
-  image: artprod.dev.bloomberg.com/tsaimpm/clickhouse:24.8
+  image: clickhouse/clickhouse-server:24.8
   ulimits:
     nofile:
       soft: 262144
@@ -21,7 +21,7 @@ x-clickhouse-common: &clickhouse-common
 services:
   # --- ZooKeeper for ClickHouse cluster coordination ---
   zookeeper:
-    image: artprod.dev.bloomberg.com/tsaimpm/zookeeper:3.9
+    image: zookeeper:3.9
     hostname: zookeeper
     environment:
       ZOO_MY_ID: 1
@@ -113,7 +113,7 @@ services:
 
   # --- Prometheus for metrics collection ---
   prometheus:
-    image: artprod.dev.bloomberg.com/tsaimpm/prometheus:2.51.0
+    image: prom/prometheus:v2.51.0
     hostname: prometheus
     ports:
       - "9090:9090"
@@ -151,7 +151,7 @@ services:
 
   # --- ChromaDB for session embedding storage ---
   vector-db:
-    image: artprod.dev.bloomberg.com/tsaimpm/chromadb:latest
+    image: chromadb/chroma:latest
     hostname: vector-db
     ports:
       - "8000:8000"

@@ -1,4 +1,4 @@
-FROM artprod.dev.bloomberg.com/python3:3.11-rhel8
+FROM python:3.13-slim
 
 WORKDIR /app
 

@@ -65,24 +65,55 @@ def _text_to_embedding(text: str) -> list[float]:
 _DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
 
-def _api_embedding(text: str) -> list[float]:
-    """Call an OpenAI-compatible ``/embeddings`` endpoint.
+def _extract_openai_embedding(data: object) -> Optional[list[float]]:
+    """Return embedding from OpenAI-compatible response shape."""
+    if not isinstance(data, dict):
+        return None
 
-    Reads configuration from environment variables:
-      - ``EMBEDDING_API_URL``  -- base URL, e.g. ``http://localhost:11434/v1``
-      - ``EMBEDDING_API_KEY``  -- optional Bearer token
-      - ``EMBEDDING_MODEL``    -- model name (default: ``text-embedding-3-small``)
+    maybe_data = data.get("data")
+    if isinstance(maybe_data, list) and maybe_data:
+        first = maybe_data[0]
+        if isinstance(first, dict):
+            emb = first.get("embedding")
+            if isinstance(emb, list):
+                return emb
+    return None
 
-    Raises ``httpx.HTTPStatusError`` on non-2xx responses.
-    """
-    base_url = os.environ["EMBEDDING_API_URL"].rstrip("/")
-    model = os.environ.get("EMBEDDING_MODEL", _DEFAULT_EMBEDDING_MODEL)
-    api_key = os.environ.get("EMBEDDING_API_KEY")
 
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+def _extract_ollama_embedding(data: object) -> Optional[list[float]]:
+    """Return embedding from Ollama response shapes."""
+    if not isinstance(data, dict):
+        return None
 
+    # /api/embeddings shape: {"embedding": [...]} 
+    emb = data.get("embedding")
+    if isinstance(emb, list):
+        return emb
+
+    # /api/embed shape: {"embeddings": [[...]]}
+    embeddings = data.get("embeddings")
+    if isinstance(embeddings, list) and embeddings:
+        first = embeddings[0]
+        if isinstance(first, list):
+            return first
+        if all(isinstance(v, (int, float)) for v in embeddings):
+            return embeddings
+
+    return None
+
+
+def _is_openai_style_base_url(base_url: str) -> bool:
+    """Treat URLs ending in /v1 as OpenAI-compatible."""
+    return base_url.rstrip("/").endswith("/v1")
+
+
+def _openai_style_embedding(
+    base_url: str,
+    text: str,
+    model: str,
+    headers: dict[str, str],
+) -> list[float]:
+    """Call OpenAI-compatible embeddings endpoint."""
     resp = httpx.post(
         f"{base_url}/embeddings",
         headers=headers,
@@ -91,8 +122,69 @@ def _api_embedding(text: str) -> list[float]:
     )
     resp.raise_for_status()
 
-    data = resp.json()
-    return data["data"][0]["embedding"]
+    emb = _extract_openai_embedding(resp.json())
+    if emb is None:
+        raise ValueError("OpenAI embedding response missing data[0].embedding")
+    return emb
+
+
+def _ollama_style_embedding(
+    base_url: str,
+    text: str,
+    model: str,
+    headers: dict[str, str],
+) -> list[float]:
+    """Call Ollama embeddings endpoint(s)."""
+    root_url = base_url[: -len("/v1")] if base_url.endswith("/v1") else base_url
+
+    # Prefer the classic Ollama endpoint first.
+    resp = httpx.post(
+        f"{root_url}/api/embeddings",
+        headers=headers,
+        json={"model": model, "prompt": text},
+        timeout=30.0,
+    )
+
+    if resp.status_code == 404:
+        # Newer endpoint variant.
+        resp = httpx.post(
+            f"{root_url}/api/embed",
+            headers=headers,
+            json={"model": model, "input": text},
+            timeout=30.0,
+        )
+
+    resp.raise_for_status()
+
+    emb = _extract_ollama_embedding(resp.json())
+    if emb is None:
+        raise ValueError("Ollama embedding response missing embedding payload")
+    return emb
+
+
+def _api_embedding(text: str) -> list[float]:
+    """Call embeddings API and return a vector of floats.
+
+        Reads configuration from environment variables:
+            - ``EMBEDDING_API_URL``  -- base URL, e.g. ``http://localhost:11434`` or ``https://api.openai.com/v1``
+            - ``EMBEDDING_API_KEY``  -- optional Bearer token
+            - ``EMBEDDING_MODEL``    -- model name (default: ``text-embedding-3-small``)
+
+        Provider selection is based on ``EMBEDDING_API_URL``:
+            - URLs ending with ``/v1`` are treated as OpenAI-compatible
+            - all other URLs are treated as Ollama-style
+        """
+    base_url = os.environ["EMBEDDING_API_URL"].rstrip("/")
+    model = os.environ.get("EMBEDDING_MODEL", _DEFAULT_EMBEDDING_MODEL)
+    api_key = os.environ.get("EMBEDDING_API_KEY")
+
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    if _is_openai_style_base_url(base_url):
+        return _openai_style_embedding(base_url, text, model, headers)
+    return _ollama_style_embedding(base_url, text, model, headers)
 
 
 def get_embedding(text: str) -> list[float]:

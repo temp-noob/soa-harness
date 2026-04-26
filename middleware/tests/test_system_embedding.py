@@ -85,6 +85,47 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
+class TestEmbeddingAPICompatibility:
+    """Provider-compatibility checks that do not require live infrastructure."""
+
+    def test_ollama_native_endpoint_and_shape(self, monkeypatch):
+        monkeypatch.setenv("EMBEDDING_API_URL", "http://localhost:11434")
+        monkeypatch.setenv("EMBEDDING_MODEL", "embeddinggemma")
+        monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
+
+        def fake_post(url, headers, json, timeout):
+            request = httpx.Request("POST", url)
+
+            if url.endswith("/api/embeddings"):
+                assert json["model"] == "embeddinggemma"
+                assert "prompt" in json or "input" in json
+                return httpx.Response(
+                    status_code=200,
+                    request=request,
+                    json={"embedding": [0.1, 0.2, 0.3]},
+                )
+
+            # Plain Ollama base URL does not expose OpenAI-compatible routes
+            # without /v1, so these should fail and trigger fallback.
+            if url.endswith("/embeddings") or url.endswith("/v1/embeddings"):
+                return httpx.Response(
+                    status_code=404,
+                    request=request,
+                    json={"error": "not found"},
+                )
+
+            return httpx.Response(
+                status_code=404,
+                request=request,
+                json={"error": "unknown route"},
+            )
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+
+        emb = _api_embedding("revenue analysis")
+        assert emb == [0.1, 0.2, 0.3]
+
+
 # ---------------------------------------------------------------------------
 # Embedding API tests
 # ---------------------------------------------------------------------------
