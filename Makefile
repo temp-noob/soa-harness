@@ -1,4 +1,4 @@
-.PHONY: up down reset load bench bench-unrestricted bench-analyst clean logs help middleware-build middleware-logs middleware-test
+.PHONY: up down reset load bench bench-unrestricted bench-analyst clean logs help middleware-build middleware-logs middleware-test bench-direct bench-middleware bench-compare agent-bench-baseline agent-bench-middleware agent-bench-compare
 
 # -------------------------------------------------------------------
 # SAO Benchmark Harness — Makefile
@@ -111,9 +111,27 @@ middleware-test: ## Test middleware health and explore endpoint
 		-d '{"sql": "SELECT tier, COUNT(*) FROM sao.customers_distributed GROUP BY tier", "agent_id": "agent"}' \
 		&& echo ""
 
-bench-middleware: ## Run all scenarios through the middleware (port 8080)
-	$(PYTHON) harness.py --profile agent --host localhost --port 8080 \
-		--output reports/middleware_agent_results.json
+# --- Security Benchmark (dual mode) ---
+
+bench-direct: ## Security: run scenarios directly against ClickHouse (baseline)
+	$(PYTHON) harness.py --mode direct --profile agent
+
+bench-middleware: ## Security: run scenarios through the middleware
+	$(PYTHON) harness.py --mode middleware --profile agent
+
+bench-compare: bench-direct bench-middleware ## Security: run both modes and compare
+	$(PYTHON) harness.py --compare reports/direct_agent.json reports/middleware_agent.json
+
+# --- Agent Efficiency Benchmark ---
+
+agent-bench-baseline: ## Agent: run LLM agents directly against ClickHouse
+	$(PYTHON) agent_bench.py --mode baseline --runs $(or $(RUNS),3)
+
+agent-bench-middleware: ## Agent: run LLM agents through the middleware
+	$(PYTHON) agent_bench.py --mode middleware --runs $(or $(RUNS),3)
+
+agent-bench-compare: agent-bench-baseline agent-bench-middleware ## Agent: run both modes and compare
+	$(PYTHON) agent_bench.py --compare reports/agent_baseline.json reports/agent_middleware.json
 
 clean: ## Remove report files
 	rm -rf reports/*.json
