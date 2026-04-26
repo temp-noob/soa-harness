@@ -5,8 +5,8 @@
 # -------------------------------------------------------------------
 
 COMPOSE := docker compose
-VENV := python -m venv .venv
-PYTHON  := $(VENV)/bin/python
+VENV := python3.13 -m venv .venv
+PYTHON  := .venv/bin/python
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -33,6 +33,7 @@ reset: down ## Destroy volumes and restart fresh
 # --- Data ---
 
 install-deps: ## Install Python dependencies
+	$(VENV)
 	$(PYTHON) -m pip install -r requirements.txt
 
 load: ## Generate and load synthetic data (50k customers, 2M transactions)
