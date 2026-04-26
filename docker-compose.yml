@@ -138,9 +138,9 @@ services:
       # Embedding API configuration (opt-in: leave empty to use local trigram hash)
       # Set EMBEDDING_API_URL to an OpenAI-compatible endpoint to use real embeddings.
       # Examples: http://ollama:11434/v1  or  https://api.openai.com/v1
-      - EMBEDDING_API_URL=
+      - EMBEDDING_API_URL=http://host.docker.internal:11434/v1
       - EMBEDDING_API_KEY=
-      - EMBEDDING_MODEL=
+      - EMBEDDING_MODEL=embeddinggemma
     networks:
       - sao-net
     depends_on:
