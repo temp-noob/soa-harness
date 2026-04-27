@@ -130,7 +130,7 @@ class QueryProxy:
                 url,
                 content=body,
                 params=query_params,
-                timeout=30.0,
+                timeout=60.0,
             )
         return resp
 

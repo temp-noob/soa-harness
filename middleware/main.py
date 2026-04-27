@@ -24,6 +24,7 @@ import re
 from contextlib import asynccontextmanager
 from typing import Optional
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
@@ -101,6 +102,36 @@ class FeedbackRequest(BaseModel):
 
 # ── ClickHouse-Compatible Endpoint ───────────────────────────────────
 
+# Headers that clickhouse_connect uses to classify errors and parse responses.
+_CH_FORWARD_HEADERS = {
+    "x-clickhouse-exception-code",
+    "x-clickhouse-summary",
+    "x-clickhouse-query-id",
+    "x-clickhouse-timezone",
+    "content-type",
+}
+
+# Non-sensitive system tables required for clickhouse_connect initialisation.
+_INIT_TABLES = frozenset({
+    "system.settings", "system.functions", "system.time_zones",
+    "system.formats", "system.table_functions", "system.data_type_families",
+})
+
+
+def _forward_response(resp: httpx.Response) -> Response:
+    """Build a FastAPI Response that forwards ClickHouse headers."""
+    headers = {}
+    for key in _CH_FORWARD_HEADERS:
+        val = resp.headers.get(key)
+        if val:
+            headers[key] = val
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        media_type=resp.headers.get("content-type", "text/plain"),
+        headers=headers,
+    )
+
 
 @app.api_route("/", methods=["GET", "POST"])
 async def clickhouse_compat(request: Request):
@@ -120,42 +151,30 @@ async def clickhouse_compat(request: Request):
     raw_body = await request.body()
     body_text = raw_body.decode("utf-8", errors="replace")
 
-    # GET requests may carry the query in ?query= param
     if request.method == "GET":
         body_text = request.query_params.get("query", body_text)
 
     agent_id = request.query_params.get("user", "agent")
 
-    # Strip FORMAT clause for access control (keep original for forwarding)
     sql_for_check = re.sub(
         r"\s+FORMAT\s+\w+\s*$", "", body_text, flags=re.IGNORECASE,
     ).strip()
 
-    # Allow client initialization queries that clickhouse_connect sends
-    # automatically (system.settings, system.functions, etc.).  These are
-    # non-sensitive server metadata, unlike system.query_log or
-    # system.processes which reveal other users' activity.
-    INIT_TABLES = {"system.settings", "system.functions", "system.time_zones",
-                   "system.formats", "system.table_functions", "system.data_type_families"}
-    sql_upper = sql_for_check.upper()
-    if sql_upper.startswith("SELECT") and any(t in sql_for_check.lower() for t in INIT_TABLES):
-        params = dict(request.query_params)
-        resp = await proxy.execute_raw(raw_body, params)
-        return Response(
-            content=resp.content,
-            status_code=resp.status_code,
-            media_type=resp.headers.get("content-type", "text/plain"),
-        )
+    # Allow client init queries (system.settings etc.) — passthrough
+    if sql_for_check and sql_for_check.upper().startswith("SELECT") and \
+       any(t in sql_for_check.lower() for t in _INIT_TABLES):
+        try:
+            resp = await proxy.execute_raw(raw_body, dict(request.query_params))
+            return _forward_response(resp)
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            return Response(content=str(e), status_code=504, media_type="text/plain")
 
     if not sql_for_check:
-        # Empty body or ping — forward directly to ClickHouse
-        params = dict(request.query_params)
-        resp = await proxy.execute_raw(raw_body, params)
-        return Response(
-            content=resp.content,
-            status_code=resp.status_code,
-            media_type=resp.headers.get("content-type", "text/plain"),
-        )
+        try:
+            resp = await proxy.execute_raw(raw_body, dict(request.query_params))
+            return _forward_response(resp)
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            return Response(content=str(e), status_code=504, media_type="text/plain")
 
     access = ac.check(agent_id, sql_for_check)
 
@@ -165,17 +184,27 @@ async def clickhouse_compat(request: Request):
             content=f"Code: 497. DB::Exception: ACCESS_DENIED: {access.reason}",
             status_code=403,
             media_type="text/plain",
+            headers={"x-clickhouse-exception-code": "497"},
         )
 
-    # Forward the original request to ClickHouse transparently
-    params = dict(request.query_params)
-    resp = await proxy.execute_raw(raw_body, params)
-
-    return Response(
-        content=resp.content,
-        status_code=resp.status_code,
-        media_type=resp.headers.get("content-type", "text/plain"),
-    )
+    # Forward to ClickHouse — pass through response with all relevant headers
+    try:
+        resp = await proxy.execute_raw(raw_body, dict(request.query_params))
+        return _forward_response(resp)
+    except httpx.TimeoutException:
+        return Response(
+            content="Code: 159. DB::Exception: Timeout exceeded (TIMEOUT_EXCEEDED)",
+            status_code=500,
+            media_type="text/plain",
+            headers={"x-clickhouse-exception-code": "159"},
+        )
+    except httpx.ConnectError as e:
+        return Response(
+            content=f"Code: 210. DB::NetException: Connection refused ({e})",
+            status_code=503,
+            media_type="text/plain",
+            headers={"x-clickhouse-exception-code": "210"},
+        )
 
 
 # ── Routes ───────────────────────────────────────────────────────────
