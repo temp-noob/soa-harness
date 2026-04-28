@@ -27,6 +27,9 @@ services:
       ZOO_MY_ID: 1
     ports:
       - "2181:2181"
+    volumes:
+      - zk-data:/data
+      - zk-datalog:/datalog
     networks:
       - sao-net
     healthcheck:
@@ -168,6 +171,8 @@ volumes:
   ch-s2r1-data:
   ch-s2r2-data:
   chroma-data:
+  zk-data:
+  zk-datalog:
 
 networks:
   sao-net:

@@ -85,6 +85,8 @@ make bench-unrestricted
 make compare
 ```
 
+If `make load` or `make load-small` fails with `TABLE_IS_READ_ONLY` mentioning missing ZooKeeper metadata, your existing ClickHouse volumes are out of sync with ZooKeeper state from an earlier restart. Run `make reset` once to recreate the cluster cleanly. After that, ordinary `make down` / `make up` cycles should keep working because ZooKeeper state is now persisted too.
+
 ### Run a specific scenario
 
 ```bash

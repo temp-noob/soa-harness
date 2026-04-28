@@ -43,9 +43,39 @@ CLICKHOUSE_URL = "http://localhost:8123"
 MIDDLEWARE_URL = "http://localhost:8080"
 
 MAX_TURNS = 15
+LLM_TIMEOUT_S = float(os.environ.get("AGENT_LLM_TIMEOUT_S", "120"))
+LLM_MAX_TOKENS = int(os.environ.get("AGENT_LLM_MAX_TOKENS", "1024"))
+QUERY_RESULT_MAX_CHARS = int(os.environ.get("AGENT_QUERY_RESULT_MAX_CHARS", "4000"))
 
 
 # ── LLM client ──────────────────────────────────────────────────────
+
+
+def _is_ollama_base_url(api_url: str) -> bool:
+    normalized = api_url.rstrip("/").lower()
+    return "localhost:11434" in normalized or "127.0.0.1:11434" in normalized or "ollama" in normalized
+
+
+def _message_text(message: dict) -> str:
+    content = message.get("content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    return ""
+
+
+def _truncate_text(text: str, limit: int) -> str:
+    if limit <= 0 or len(text) <= limit:
+        return text
+    omitted = len(text) - limit
+    return f"{text[:limit]}\n\n... [truncated {omitted} chars]"
 
 
 def _llm_chat(messages: list[dict], api_url: str, api_key: str | None, model: str) -> tuple[str, int]:
@@ -57,19 +87,28 @@ def _llm_chat(messages: list[dict], api_url: str, api_key: str | None, model: st
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    payload: dict[str, object] = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.0,
+        "max_tokens": LLM_MAX_TOKENS,
+    }
+
+    # Thinking-capable Ollama models default to emitting a separate reasoning trace,
+    # which can leave message.content empty for this benchmark's parser.
+    if _is_ollama_base_url(api_url):
+        payload["reasoning_effort"] = "none"
+        payload["reasoning"] = {"effort": "none"}
+
     resp = httpx.post(
         f"{api_url.rstrip('/')}/chat/completions",
         headers=headers,
-        json={
-            "model": model,
-            "messages": messages,
-            "temperature": 0.0,
-        },
-        timeout=120.0,
+        json=payload,
+        timeout=LLM_TIMEOUT_S,
     )
     resp.raise_for_status()
     data = resp.json()
-    content = data["choices"][0]["message"]["content"]
+    content = _message_text(data["choices"][0]["message"])
     tokens = data.get("usage", {}).get("total_tokens", 0)
     return content, tokens
 
@@ -191,10 +230,48 @@ def _build_schema_context(explore_data: dict) -> str:
 def _build_similar_queries_context(similar: list[dict]) -> str:
     if not similar:
         return ""
+
+    def _is_policy_blocked_note(sq: dict) -> bool:
+        notes = str(sq.get("notes", "")).lower()
+        return (
+            "policy_blocked" in notes
+            or "access_denied" in notes
+            or "blocked:" in notes
+        )
+
+    positives = [sq for sq in similar if sq.get("feedback") is True]
+    negatives = [
+        sq for sq in similar
+        if sq.get("feedback") is False and _is_policy_blocked_note(sq)
+    ]
+
     lines = ["## Queries from Similar Past Sessions\n"]
-    for sq in similar[:5]:
-        lines.append(f"- `{sq['sql']}` (notes: {sq.get('notes', 'none')})")
+    if positives:
+        lines.append("### Useful prior queries")
+        for sq in positives[:5]:
+            lines.append(f"- `{sq['sql']}` (notes: {sq.get('notes', 'none')})")
+
+    if negatives:
+        lines.append("\n### Avoid these policy-blocked patterns")
+        for sq in negatives[:3]:
+            lines.append(f"- Avoid: `{sq['sql']}`")
+            lines.append(f"  Reason: {sq.get('notes', 'policy blocked in prior session')}")
+
     return "\n".join(lines)
+
+
+def _build_feedback_notes(sql: str, query_result: str, success: bool) -> str:
+    if success:
+        return f"SUCCESS_QUERY: {sql[:100]}"
+
+    result_text = (query_result or "").strip()
+    lower = result_text.lower()
+    if lower.startswith("blocked:"):
+        reason = result_text[len("Blocked:"):].strip()
+        return f"POLICY_BLOCKED: {reason[:240]}"
+    if "access_denied" in lower:
+        return f"POLICY_BLOCKED: {result_text[:240]}"
+    return f"QUERY_FAILED: {result_text[:240]}"
 
 
 # ── Agent runners ────────────────────────────────────────────────────
@@ -256,6 +333,7 @@ def run_baseline_agent(
             result.answer_queries += 1
 
         query_result, success = _execute_sql_direct(sql)
+        query_result = _truncate_text(query_result, QUERY_RESULT_MAX_CHARS)
         if success:
             messages.append({"role": "user", "content": f"Query result:\n{query_result}"})
         else:
@@ -344,12 +422,14 @@ def run_middleware_agent(
         else:
             query_result, success = _execute_sql_direct(sql)
 
+        query_result = _truncate_text(query_result, QUERY_RESULT_MAX_CHARS)
+
         # Submit feedback — if the query returned data, mark as relevant
         if session_id:
             try:
                 requests.post(
                     f"{MIDDLEWARE_URL}/session/{session_id}/feedback",
-                    json={"relevant": success, "notes": sql[:100]},
+                    json={"relevant": success, "notes": _build_feedback_notes(sql, query_result, success)},
                     timeout=5,
                 )
             except Exception:

@@ -27,6 +27,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+NEGATIVE_QUERY_LIMIT = max(1, min(3, int(os.environ.get("SESSION_NEGATIVE_LIMIT", "2"))))
+
 # ---------------------------------------------------------------------------
 # Lightweight text embedding (fallback)
 # ---------------------------------------------------------------------------
@@ -317,6 +319,20 @@ class SimilarQuery:
     similarity_score: float
 
 
+def _is_policy_blocked_negative(sq: dict) -> bool:
+    if sq.get("feedback") is not False:
+        return False
+
+    notes = str(sq.get("notes") or "").lower()
+    if "policy_blocked" in notes:
+        return True
+    if "access_denied" in notes:
+        return True
+    if "blocked:" in notes:
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Session Manager
 # ---------------------------------------------------------------------------
@@ -355,7 +371,8 @@ class SessionManager:
     ) -> tuple[str, list[SimilarQuery]]:
         session_id = str(uuid.uuid4())
 
-        similar_queries: list[SimilarQuery] = []
+        positive_candidates: list[SimilarQuery] = []
+        negative_candidates: list[SimilarQuery] = []
         if self._available and self._chroma.count() > 0:
             try:
                 emb = get_embedding(description)
@@ -386,7 +403,7 @@ class SessionManager:
 
                         for sq in stored_queries:
                             if sq.get("feedback") is True:
-                                similar_queries.append(
+                                positive_candidates.append(
                                     SimilarQuery(
                                         sql=sq["sql"],
                                         feedback=True,
@@ -397,11 +414,46 @@ class SessionManager:
                                         similarity_score=similarity,
                                     )
                                 )
+                            elif _is_policy_blocked_negative(sq):
+                                negative_candidates.append(
+                                    SimilarQuery(
+                                        sql=sq.get("sql", ""),
+                                        feedback=False,
+                                        notes=sq.get("notes"),
+                                        session_description=meta.get(
+                                            "description", ""
+                                        ),
+                                        similarity_score=similarity,
+                                    )
+                                )
             except Exception as e:
                 logger.warning("Error querying ChromaDB: %s", e)
 
-        similar_queries.sort(key=lambda q: q.similarity_score, reverse=True)
-        similar_queries = similar_queries[:top_k]
+        # De-duplicate by SQL text while preserving best similarity first.
+        def _dedupe_best(candidates: list[SimilarQuery]) -> list[SimilarQuery]:
+            candidates.sort(key=lambda q: q.similarity_score, reverse=True)
+            out: list[SimilarQuery] = []
+            seen_sql: set[str] = set()
+            for c in candidates:
+                key = c.sql.strip().lower()
+                if not key or key in seen_sql:
+                    continue
+                seen_sql.add(key)
+                out.append(c)
+            return out
+
+        positives = _dedupe_best(positive_candidates)
+        negatives = _dedupe_best(negative_candidates)
+
+        if positives:
+            neg_limit = min(NEGATIVE_QUERY_LIMIT, max(0, top_k - 1))
+        else:
+            neg_limit = min(NEGATIVE_QUERY_LIMIT, top_k)
+
+        selected_negatives = negatives[:neg_limit]
+        remaining = max(0, top_k - len(selected_negatives))
+        selected_positives = positives[:remaining]
+        similar_queries = selected_positives + selected_negatives
 
         session = SessionInfo(
             session_id=session_id,
