@@ -78,10 +78,15 @@ def _truncate_text(text: str, limit: int) -> str:
     return f"{text[:limit]}\n\n... [truncated {omitted} chars]"
 
 
+_MAX_RETRIES = 5
+
+
 def _llm_chat(messages: list[dict], api_url: str, api_key: str | None, model: str) -> tuple[str, int]:
     """Call an OpenAI-compatible chat completions endpoint.
 
     Returns (assistant_message, tokens_used).
+    Retries up to _MAX_RETRIES times on HTTP 429 (rate limit), using the
+    Retry-After header when available, otherwise exponential backoff.
     """
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if api_key:
@@ -94,23 +99,36 @@ def _llm_chat(messages: list[dict], api_url: str, api_key: str | None, model: st
         "max_tokens": LLM_MAX_TOKENS,
     }
 
-    # Thinking-capable Ollama models default to emitting a separate reasoning trace,
-    # which can leave message.content empty for this benchmark's parser.
     if _is_ollama_base_url(api_url):
         payload["reasoning_effort"] = "none"
         payload["reasoning"] = {"effort": "none"}
 
-    resp = httpx.post(
-        f"{api_url.rstrip('/')}/chat/completions",
-        headers=headers,
-        json=payload,
-        timeout=LLM_TIMEOUT_S,
-    )
+    url = f"{api_url.rstrip('/')}/chat/completions"
+
+    for attempt in range(_MAX_RETRIES + 1):
+        resp = httpx.post(url, headers=headers, json=payload, timeout=LLM_TIMEOUT_S)
+
+        if resp.status_code != 429:
+            resp.raise_for_status()
+            data = resp.json()
+            content = _message_text(data["choices"][0]["message"])
+            tokens = data.get("usage", {}).get("total_tokens", 0)
+            return content, tokens
+
+        if attempt == _MAX_RETRIES:
+            resp.raise_for_status()
+
+        retry_after = resp.headers.get("retry-after") or resp.headers.get("Retry-After")
+        if retry_after:
+            wait = float(retry_after)
+        else:
+            wait = min(2 ** attempt, 60)
+
+        print(f"\n    [429 rate limit — retrying in {wait:.0f}s (attempt {attempt + 1}/{_MAX_RETRIES})]", flush=True)
+        time.sleep(wait)
+
     resp.raise_for_status()
-    data = resp.json()
-    content = _message_text(data["choices"][0]["message"])
-    tokens = data.get("usage", {}).get("total_tokens", 0)
-    return content, tokens
+    return "", 0
 
 
 # ── Query execution ──────────────────────────────────────────────────
