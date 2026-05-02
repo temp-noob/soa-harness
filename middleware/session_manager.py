@@ -313,7 +313,7 @@ class SessionInfo:
 @dataclass
 class SimilarQuery:
     sql: str
-    feedback: bool
+    feedback: Optional[bool]
     notes: Optional[str]
     session_description: str
     similarity_score: float
@@ -372,6 +372,7 @@ class SessionManager:
         session_id = str(uuid.uuid4())
 
         positive_candidates: list[SimilarQuery] = []
+        unfeedback_candidates: list[SimilarQuery] = []
         negative_candidates: list[SimilarQuery] = []
         if self._available and self._chroma.count() > 0:
             try:
@@ -402,11 +403,24 @@ class SessionManager:
                             stored_queries = []
 
                         for sq in stored_queries:
-                            if sq.get("feedback") is True:
+                            fb = sq.get("feedback")
+                            if fb is True:
                                 positive_candidates.append(
                                     SimilarQuery(
                                         sql=sq["sql"],
                                         feedback=True,
+                                        notes=sq.get("notes"),
+                                        session_description=meta.get(
+                                            "description", ""
+                                        ),
+                                        similarity_score=similarity,
+                                    )
+                                )
+                            elif fb is None:
+                                unfeedback_candidates.append(
+                                    SimilarQuery(
+                                        sql=sq.get("sql", ""),
+                                        feedback=None,
                                         notes=sq.get("notes"),
                                         session_description=meta.get(
                                             "description", ""
@@ -443,8 +457,10 @@ class SessionManager:
             return out
 
         positives = _dedupe_best(positive_candidates)
+        unfeedbackd = _dedupe_best(unfeedback_candidates)
         negatives = _dedupe_best(negative_candidates)
 
+        # Priority: positives first, then unfeedback'd, then negatives (capped).
         if positives:
             neg_limit = min(NEGATIVE_QUERY_LIMIT, max(0, top_k - 1))
         else:
@@ -453,7 +469,9 @@ class SessionManager:
         selected_negatives = negatives[:neg_limit]
         remaining = max(0, top_k - len(selected_negatives))
         selected_positives = positives[:remaining]
-        similar_queries = selected_positives + selected_negatives
+        remaining = max(0, remaining - len(selected_positives))
+        selected_unfeedbackd = unfeedbackd[:remaining]
+        similar_queries = selected_positives + selected_unfeedbackd + selected_negatives
 
         session = SessionInfo(
             session_id=session_id,
