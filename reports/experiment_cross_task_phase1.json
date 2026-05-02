@@ -1,0 +1,61 @@
+{
+  "benchmark": "agent-efficiency",
+  "timestamp": "2026-05-02T19:41:11.637092+00:00",
+  "config": {
+    "mode": "middleware",
+    "model": "gpt-4o",
+    "runs": 3,
+    "feedback": true,
+    "explore": true
+  },
+  "results": [
+    {
+      "task_id": "revenue_by_category",
+      "mode": "middleware",
+      "model": "gpt-4o",
+      "agent_run": 1,
+      "queries_executed": 1,
+      "exploration_queries": 0,
+      "answer_queries": 1,
+      "correct": false,
+      "total_latency_ms": 4562.750750003033,
+      "llm_tokens_used": 1935,
+      "similar_queries_received": 0,
+      "similar_queries_used": 0,
+      "final_answer": "The total revenue (in USD) by product category for completed transactions, ordered by revenue descending, is as follows:\n1. Sports: $171,474,428.18\n2. Clothing: $170,400,420.06\n3. Home & Garden: $170,320,147.94\n4. Grocery: $170,060,557.57\n5. Automotive: $169,801,866.38\n6. Toys: $169,761,712.76\n7. Books: $169,677,784.69\n8. Health: $169,421,759.25\n9. Electronics: $169,406,475.89\n10. Jewelry: $168,906,787.29",
+      "error": null
+    },
+    {
+      "task_id": "revenue_by_category",
+      "mode": "middleware",
+      "model": "gpt-4o",
+      "agent_run": 2,
+      "queries_executed": 1,
+      "exploration_queries": 0,
+      "answer_queries": 1,
+      "correct": false,
+      "total_latency_ms": 3053.5390000004554,
+      "llm_tokens_used": 2119,
+      "similar_queries_received": 1,
+      "similar_queries_used": 0,
+      "final_answer": "The total revenue (in USD) by product category for completed transactions, ordered by revenue descending, is as follows:\n\n1. Sports: $171,474,428.18\n2. Clothing: $170,400,420.06\n3. Home & Garden: $170,320,147.94\n4. Grocery: $170,060,557.57\n5. Automotive: $169,801,866.38\n6. Toys: $169,761,712.76\n7. Books: $169,677,784.69\n8. Health: $169,421,759.25\n9. Electronics: $169,406,475.89\n10. Jewelry: $168,906,787.29",
+      "error": null
+    },
+    {
+      "task_id": "revenue_by_category",
+      "mode": "middleware",
+      "model": "gpt-4o",
+      "agent_run": 3,
+      "queries_executed": 1,
+      "exploration_queries": 0,
+      "answer_queries": 1,
+      "correct": false,
+      "total_latency_ms": 3132.1721249987604,
+      "llm_tokens_used": 2279,
+      "similar_queries_received": 2,
+      "similar_queries_used": 0,
+      "final_answer": "The total revenue (in USD) by product category for completed transactions, ordered by revenue descending, is as follows:\n\n1. Sports: $171,474,428.18\n2. Clothing: $170,400,420.06\n3. Home & Garden: $170,320,147.94\n4. Grocery: $170,060,557.57\n5. Automotive: $169,801,866.38\n6. Toys: $169,761,712.76\n7. Books: $169,677,784.69\n8. Health: $169,421,759.25\n9. Electronics: $169,406,475.89\n10. Jewelry: $168,906,787.29",
+      "error": null
+    }
+  ]
+}

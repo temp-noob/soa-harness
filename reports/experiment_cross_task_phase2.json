@@ -1,0 +1,61 @@
+{
+  "benchmark": "agent-efficiency",
+  "timestamp": "2026-05-02T19:41:20.595198+00:00",
+  "config": {
+    "mode": "middleware",
+    "model": "gpt-4o",
+    "runs": 3,
+    "feedback": true,
+    "explore": true
+  },
+  "results": [
+    {
+      "task_id": "category_refund_rate",
+      "mode": "middleware",
+      "model": "gpt-4o",
+      "agent_run": 1,
+      "queries_executed": 1,
+      "exploration_queries": 0,
+      "answer_queries": 1,
+      "correct": false,
+      "total_latency_ms": 3477.9158329911297,
+      "llm_tokens_used": 2560,
+      "similar_queries_received": 3,
+      "similar_queries_used": 0,
+      "final_answer": "The refund rate by product category, ordered by refund rate descending, is as follows:\n1. Automotive: 8.15%\n2. Electronics: 8.11%\n3. Books: 8.08%\n4. Grocery: 8.00%\n5. Clothing: 7.96%\n6. Toys: 7.96%\n7. Health: 7.96%\n8. Sports: 7.93%\n9. Jewelry: 7.84%\n10. Home & Garden: 7.82%",
+      "error": null
+    },
+    {
+      "task_id": "category_refund_rate",
+      "mode": "middleware",
+      "model": "gpt-4o",
+      "agent_run": 2,
+      "queries_executed": 1,
+      "exploration_queries": 0,
+      "answer_queries": 1,
+      "correct": false,
+      "total_latency_ms": 2900.9649170038756,
+      "llm_tokens_used": 2562,
+      "similar_queries_received": 4,
+      "similar_queries_used": 0,
+      "final_answer": "The refund rates by product category, ordered by refund rate descending, are as follows:\n1. Automotive: 8.15%\n2. Electronics: 8.11%\n3. Books: 8.08%\n4. Grocery: 8.00%\n5. Clothing: 7.96%\n6. Toys: 7.96%\n7. Health: 7.96%\n8. Sports: 7.93%\n9. Jewelry: 7.84%\n10. Home & Garden: 7.82%",
+      "error": null
+    },
+    {
+      "task_id": "category_refund_rate",
+      "mode": "middleware",
+      "model": "gpt-4o",
+      "agent_run": 3,
+      "queries_executed": 1,
+      "exploration_queries": 0,
+      "answer_queries": 1,
+      "correct": false,
+      "total_latency_ms": 2449.1258339985507,
+      "llm_tokens_used": 2708,
+      "similar_queries_received": 5,
+      "similar_queries_used": 0,
+      "final_answer": "The refund rates by product category, ordered by refund rate descending, are as follows:\n\n1. Automotive: 8.15%\n2. Electronics: 8.11%\n3. Books: 8.08%\n4. Grocery: 8.00%\n5. Clothing: 7.96%\n6. Toys: 7.96%\n7. Health: 7.96%\n8. Sports: 7.93%\n9. Jewelry: 7.84%\n10. Home & Garden: 7.82%",
+      "error": null
+    }
+  ]
+}
