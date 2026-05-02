@@ -368,20 +368,24 @@ def run_middleware_agent(
     api_key: str | None,
     model: str,
     feedback_enabled: bool = True,
+    explore_enabled: bool = True,
 ) -> AgentResult:
     result = AgentResult(
         task_id=task.id, mode="middleware", model=model, agent_run=agent_run,
     )
     t0 = time.monotonic()
 
-    # Step 1: Get schema from /explore
-    try:
-        explore_resp = requests.get(
-            f"{MIDDLEWARE_URL}/explore", params={"agent_id": "agent"}, timeout=10,
-        )
-        explore_data = explore_resp.json()
-        schema_ctx = _build_schema_context(explore_data)
-    except Exception:
+    # Step 1: Get schema from /explore (skip if explore is disabled)
+    if explore_enabled:
+        try:
+            explore_resp = requests.get(
+                f"{MIDDLEWARE_URL}/explore", params={"agent_id": "agent"}, timeout=10,
+            )
+            explore_data = explore_resp.json()
+            schema_ctx = _build_schema_context(explore_data)
+        except Exception:
+            schema_ctx = ""
+    else:
         schema_ctx = ""
 
     # Step 2: Start session
@@ -481,6 +485,7 @@ def run_agent_bench(
     task_ids: list[str] | None,
     output_path: str,
     feedback_enabled: bool = True,
+    explore_enabled: bool = True,
 ) -> dict:
     selected_tasks = TASKS
     if task_ids:
@@ -489,6 +494,7 @@ def run_agent_bench(
 
     runner = run_baseline_agent if mode == "baseline" else run_middleware_agent
     feedback_label = "ON" if feedback_enabled else "OFF"
+    explore_label = "ON" if explore_enabled else "OFF"
 
     print("=" * 70)
     print(f"  Agent Efficiency Benchmark — {mode.upper()} mode")
@@ -498,6 +504,7 @@ def run_agent_bench(
     print(f"  Tasks:    {len(selected_tasks)}")
     if mode == "middleware":
         print(f"  Feedback: {feedback_label}")
+        print(f"  Explore:  {explore_label}")
     print("=" * 70)
 
     all_results: list[dict] = []
@@ -511,7 +518,9 @@ def run_agent_bench(
         for run_num in range(1, runs + 1):
             print(f"\n  Agent #{run_num}...", end=" ", flush=True)
             if mode == "middleware":
-                result = runner(task, run_num, api_url, api_key, model, feedback_enabled=feedback_enabled)
+                result = runner(task, run_num, api_url, api_key, model,
+                                feedback_enabled=feedback_enabled,
+                                explore_enabled=explore_enabled)
             else:
                 result = runner(task, run_num, api_url, api_key, model)
 
@@ -544,7 +553,7 @@ def run_agent_bench(
     report = {
         "benchmark": "agent-efficiency",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "config": {"mode": mode, "model": model, "runs": runs, "feedback": feedback_enabled},
+        "config": {"mode": mode, "model": model, "runs": runs, "feedback": feedback_enabled, "explore": explore_enabled},
         "results": all_results,
     }
 
@@ -606,6 +615,8 @@ def main():
     parser.add_argument("--output", "-o", default=None)
     parser.add_argument("--no-feedback", action="store_true",
                         help="Disable agent feedback submission (middleware mode only)")
+    parser.add_argument("--no-explore", action="store_true",
+                        help="Skip /explore endpoint, provide empty schema context (middleware mode only)")
     parser.add_argument("--compare", nargs=2, metavar=("A", "B"), help="Compare two agent reports")
     args = parser.parse_args()
 
@@ -633,6 +644,7 @@ def main():
         task_ids=args.tasks,
         output_path=output,
         feedback_enabled=not args.no_feedback,
+        explore_enabled=not args.no_explore,
     )
 
 
