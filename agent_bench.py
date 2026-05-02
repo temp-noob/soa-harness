@@ -367,6 +367,7 @@ def run_middleware_agent(
     api_url: str,
     api_key: str | None,
     model: str,
+    feedback_enabled: bool = True,
 ) -> AgentResult:
     result = AgentResult(
         task_id=task.id, mode="middleware", model=model, agent_run=agent_run,
@@ -442,8 +443,7 @@ def run_middleware_agent(
 
         query_result = _truncate_text(query_result, QUERY_RESULT_MAX_CHARS)
 
-        # Submit feedback — if the query returned data, mark as relevant
-        if session_id:
+        if session_id and feedback_enabled:
             try:
                 requests.post(
                     f"{MIDDLEWARE_URL}/session/{session_id}/feedback",
@@ -480,6 +480,7 @@ def run_agent_bench(
     model: str,
     task_ids: list[str] | None,
     output_path: str,
+    feedback_enabled: bool = True,
 ) -> dict:
     selected_tasks = TASKS
     if task_ids:
@@ -487,13 +488,16 @@ def run_agent_bench(
         selected_tasks = [t for t in TASKS if t.id in id_set]
 
     runner = run_baseline_agent if mode == "baseline" else run_middleware_agent
+    feedback_label = "ON" if feedback_enabled else "OFF"
 
     print("=" * 70)
     print(f"  Agent Efficiency Benchmark — {mode.upper()} mode")
     print("=" * 70)
-    print(f"  Model:  {model}")
-    print(f"  Runs:   {runs} agents per task")
-    print(f"  Tasks:  {len(selected_tasks)}")
+    print(f"  Model:    {model}")
+    print(f"  Runs:     {runs} agents per task")
+    print(f"  Tasks:    {len(selected_tasks)}")
+    if mode == "middleware":
+        print(f"  Feedback: {feedback_label}")
     print("=" * 70)
 
     all_results: list[dict] = []
@@ -506,7 +510,10 @@ def run_agent_bench(
 
         for run_num in range(1, runs + 1):
             print(f"\n  Agent #{run_num}...", end=" ", flush=True)
-            result = runner(task, run_num, api_url, api_key, model)
+            if mode == "middleware":
+                result = runner(task, run_num, api_url, api_key, model, feedback_enabled=feedback_enabled)
+            else:
+                result = runner(task, run_num, api_url, api_key, model)
 
             status = "\033[92mCORRECT\033[0m" if result.correct else "\033[93mDONE\033[0m"
             if result.error:
@@ -537,7 +544,7 @@ def run_agent_bench(
     report = {
         "benchmark": "agent-efficiency",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "config": {"mode": mode, "model": model, "runs": runs},
+        "config": {"mode": mode, "model": model, "runs": runs, "feedback": feedback_enabled},
         "results": all_results,
     }
 
@@ -597,6 +604,8 @@ def main():
     parser.add_argument("--runs", type=int, default=3, help="Number of agents per task")
     parser.add_argument("--tasks", type=lambda s: s.split(","), default=None, help="Comma-separated task IDs")
     parser.add_argument("--output", "-o", default=None)
+    parser.add_argument("--no-feedback", action="store_true",
+                        help="Disable agent feedback submission (middleware mode only)")
     parser.add_argument("--compare", nargs=2, metavar=("A", "B"), help="Compare two agent reports")
     args = parser.parse_args()
 
@@ -623,6 +632,7 @@ def main():
         model=model,
         task_ids=args.tasks,
         output_path=output,
+        feedback_enabled=not args.no_feedback,
     )
 
 

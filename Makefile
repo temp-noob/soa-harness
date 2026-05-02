@@ -1,4 +1,4 @@
-.PHONY: up down reset load bench bench-unrestricted bench-analyst clean logs help middleware-build middleware-logs middleware-test bench-direct bench-middleware bench-compare agent-bench-baseline agent-bench-middleware agent-bench-compare
+.PHONY: up down reset load bench bench-unrestricted bench-analyst clean logs help middleware-build middleware-logs middleware-test bench-direct bench-middleware bench-compare agent-bench-baseline agent-bench-middleware agent-bench-compare bench-reset-sessions
 
 # -------------------------------------------------------------------
 # SAO Benchmark Harness — Makefile
@@ -132,6 +132,12 @@ agent-bench-middleware: ## Agent: run LLM agents through the middleware
 
 agent-bench-compare: agent-bench-baseline agent-bench-middleware ## Agent: run both modes and compare
 	$(PYTHON) agent_bench.py --compare reports/agent_baseline.json reports/agent_middleware.json
+
+bench-reset-sessions: ## Clear ChromaDB session data for clean benchmarks
+	@curl -s -X DELETE "http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections/agent_sessions" > /dev/null 2>&1 || true
+	@$(COMPOSE) restart middleware > /dev/null 2>&1
+	@sleep 3
+	@echo "Sessions cleared. Ready for clean benchmark."
 
 clean: ## Remove report files
 	rm -rf reports/*.json
