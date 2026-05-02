@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from access_control import AccessControlService, Decision
 from explore import ExploreService
 from query_proxy import QueryProxy
+from rate_limiter import RateLimiter
 from session_manager import SessionManager
 
 logging.basicConfig(
@@ -53,6 +54,7 @@ async def lifespan(app: FastAPI):
     app.state.proxy = QueryProxy(ac, CH_HOST, CH_PORT)
     app.state.sessions = SessionManager(VECTOR_DB_HOST, VECTOR_DB_PORT)
     app.state.explore = ExploreService(ac, CH_HOST, CH_PORT)
+    app.state.rate_limiter = RateLimiter()
     yield
     logger.info("Middleware shutting down")
 
@@ -118,6 +120,19 @@ _INIT_TABLES = frozenset({
 })
 
 
+def _rate_limit_response(retry_after: float) -> Response:
+    """Return HTTP 429 with Retry-After header."""
+    return Response(
+        content=f"Code: 429. DB::Exception: TOO_MANY_REQUESTS: Rate limit exceeded. Retry after {retry_after:.1f}s",
+        status_code=429,
+        media_type="text/plain",
+        headers={
+            "Retry-After": str(int(retry_after) + 1),
+            "x-clickhouse-exception-code": "429",
+        },
+    )
+
+
 def _forward_response(resp: httpx.Response) -> Response:
     """Build a FastAPI Response that forwards ClickHouse headers."""
     headers = {}
@@ -155,6 +170,11 @@ async def clickhouse_compat(request: Request):
         body_text = request.query_params.get("query", body_text)
 
     agent_id = request.query_params.get("user", "agent")
+
+    rl: RateLimiter = app.state.rate_limiter
+    allowed, retry_after = rl.check(agent_id)
+    if not allowed:
+        return _rate_limit_response(retry_after)
 
     sql_for_check = re.sub(
         r"\s+FORMAT\s+\w+\s*$", "", body_text, flags=re.IGNORECASE,
@@ -247,6 +267,15 @@ async def session_query(session_id: str, req: QueryRequest):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    rl: RateLimiter = app.state.rate_limiter
+    allowed, retry_after = rl.check(session.agent_id)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded. Retry after {retry_after:.1f}s",
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
+
     result = await proxy.execute(
         agent_id=session.agent_id,
         sql=req.sql,
@@ -291,6 +320,15 @@ async def session_end(session_id: str):
 async def stateless_query(req: QueryRequest):
     """Execute a query without a session — access control still applies."""
     proxy: QueryProxy = app.state.proxy
+
+    rl: RateLimiter = app.state.rate_limiter
+    allowed, retry_after = rl.check(req.agent_id)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded. Retry after {retry_after:.1f}s",
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
 
     result = await proxy.execute(agent_id=req.agent_id, sql=req.sql)
     await proxy.log_to_audit(req.agent_id, req.sql, result)
