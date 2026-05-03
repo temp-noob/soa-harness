@@ -45,6 +45,7 @@ for f in \
     reports/agent_middleware.json \
     reports/agent_baseline.json \
     reports/experiment_agents_baseline_gpt-4o.json \
+    reports/experiment_agent_middleware_no_feedback_no_explore-gpt-4o.json \
 ; do
     if [ -f "$f" ]; then
         REPORTS+=("$f")

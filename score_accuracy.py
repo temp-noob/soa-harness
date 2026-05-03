@@ -40,37 +40,57 @@ from tasks import TASKS
 # ── Step 1: Generate gold results ────────────────────────────────────
 
 
+def _try_query(host: str, port: int, sql: str) -> requests.Response | None:
+    """Execute a query, return response if 200, else None."""
+    try:
+        resp = requests.post(
+            f"http://{host}:{port}/",
+            params={"user": "default"},
+            data=sql + " FORMAT TabSeparatedWithNames",
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            return resp
+    except Exception:
+        pass
+    return None
+
+
 def generate_gold(host: str, port: int, output: str) -> dict:
     gold: dict[str, dict] = {}
 
     for task in TASKS:
-        sql = task.gold_sql + " FORMAT TabSeparatedWithNames"
-        try:
-            resp = requests.post(
-                f"http://{host}:{port}/",
-                params={"user": "default"},
-                data=sql,
-                timeout=30,
-            )
-            if resp.status_code == 200:
-                lines = resp.text.strip().split("\n")
-                headers = lines[0].split("\t") if lines else []
-                rows = [line.split("\t") for line in lines[1:]] if len(lines) > 1 else []
-                gold[task.id] = {
-                    "task_id": task.id,
-                    "question": task.question,
-                    "gold_sql": task.gold_sql,
-                    "headers": headers,
-                    "rows": rows,
-                    "row_count": len(rows),
-                }
-                print(f"  {task.id}: {len(rows)} rows")
-            else:
-                print(f"  {task.id}: ERROR {resp.status_code} — {resp.text[:100]}")
-                gold[task.id] = {"task_id": task.id, "error": resp.text[:200]}
-        except Exception as e:
-            print(f"  {task.id}: FAILED — {e}")
-            gold[task.id] = {"task_id": task.id, "error": str(e)}
+        # Try the gold SQL first; if it fails (e.g. distributed JOIN),
+        # retry with local tables (replace _distributed with empty string).
+        variants = [
+            task.gold_sql,
+            task.gold_sql.replace("_distributed", ""),
+        ]
+
+        resp = None
+        used_sql = ""
+        for sql in variants:
+            resp = _try_query(host, port, sql)
+            if resp:
+                used_sql = sql
+                break
+
+        if resp:
+            lines = resp.text.strip().split("\n")
+            headers = lines[0].split("\t") if lines else []
+            rows = [line.split("\t") for line in lines[1:]] if len(lines) > 1 else []
+            gold[task.id] = {
+                "task_id": task.id,
+                "question": task.question,
+                "gold_sql": used_sql,
+                "headers": headers,
+                "rows": rows,
+                "row_count": len(rows),
+            }
+            print(f"  {task.id}: {len(rows)} rows")
+        else:
+            print(f"  {task.id}: FAILED — all SQL variants returned errors")
+            gold[task.id] = {"task_id": task.id, "error": "all variants failed"}
 
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     with open(output, "w") as f:
@@ -128,10 +148,12 @@ def _check_answer_against_gold(
     agent_text_lower = agent_answer.lower()
 
     # Check: do the gold row labels appear in the agent answer?
+    # Normalize underscores to spaces so "home_garden" matches "home garden"
     label_matches = 0
     for row in gold_rows[:5]:
         label = row[0].strip().lower()
-        if label in agent_text_lower:
+        label_normalized = label.replace("_", " ")
+        if label in agent_text_lower or label_normalized in agent_text_lower:
             label_matches += 1
 
     # Check: do the gold numeric values appear in the agent answer?

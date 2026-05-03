@@ -120,8 +120,8 @@ TASKS: list[AnalyticalTask] = [
         difficulty="medium",
         gold_sql=(
             "SELECT c.tier, AVG(t.amount_cents) / 100 AS avg_usd "
-            "FROM sao.transactions_distributed t "
-            "JOIN sao.customers_distributed c ON t.customer_id = c.customer_id "
+            "FROM sao.transactions t "
+            "JOIN sao.customers c ON t.customer_id = c.customer_id "
             "WHERE t.status = 'completed' "
             "GROUP BY c.tier "
             "ORDER BY avg_usd DESC"
