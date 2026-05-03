@@ -301,7 +301,27 @@
   },
   "customer_tier_revenue": {
     "task_id": "customer_tier_revenue",
-    "error": "Code: 288. DB::Exception: Double-distributed IN/JOIN subqueries is denied (distributed_product_mode = 'deny'). You may rewrite query to use local tables in subqueries, or use GLOBAL keyword, or set di"
+    "question": "What is the average transaction amount (in USD) by customer tier? Join the customers and transactions tables. Return tier and average amount.",
+    "gold_sql": "SELECT c.tier, AVG(t.amount_cents) / 100 AS avg_usd FROM sao.transactions t JOIN sao.customers c ON t.customer_id = c.customer_id WHERE t.status = 'completed' GROUP BY c.tier ORDER BY avg_usd DESC",
+    "headers": [
+      "tier",
+      "avg_usd"
+    ],
+    "rows": [
+      [
+        "enterprise",
+        "2499.973129210922"
+      ],
+      [
+        "premium",
+        "2496.8798828661293"
+      ],
+      [
+        "free",
+        "2496.480784275432"
+      ]
+    ],
+    "row_count": 3
   },
   "monthly_growth": {
     "task_id": "monthly_growth",
