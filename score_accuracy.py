@@ -84,7 +84,7 @@ def generate_gold(host: str, port: int, output: str) -> dict:
 
 def _extract_numbers(text: str) -> list[float]:
     """Extract all numbers from a text string."""
-    return [float(x.replace(",", "")) for x in re.findall(r"[\d,]+\.?\d*", text)]
+    return [float(x.replace(",", "")) for x in re.findall(r"\d[\d,]*\.?\d*", text)]
 
 
 def _extract_top_values(text: str, n: int = 3) -> list[str]:

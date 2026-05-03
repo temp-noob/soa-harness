@@ -25,9 +25,9 @@ echo ""
 
 # Step 1: Generate gold results
 echo "--- Step 1: Running gold SQL against ClickHouse ---"
-python score_accuracy.py --generate-gold \
-    --host localhost --port 8123 \
-    -o reports/gold_results.json
+# python score_accuracy.py --generate-gold \
+#     --host localhost --port 8123 \
+#     -o reports/gold_results.json
 echo ""
 
 # Step 2: Score all available agent reports
@@ -43,6 +43,8 @@ for f in \
     reports/agent_bench_middleware_test_gpt-4o.json \
     reports/agent_bench_middleware_test_gpt-4o-mini.json \
     reports/agent_middleware.json \
+    reports/agent_baseline.json \
+    reports/experiment_agents_baseline_gpt-4o.json \
 ; do
     if [ -f "$f" ]; then
         REPORTS+=("$f")
