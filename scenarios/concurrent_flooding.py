@@ -108,6 +108,10 @@ class ConcurrentFloodingScenario(BaseScenario):
             raise ValueError(
                 f"RATE_LIMIT_REQUESTS must be a non-negative integer, got: {raw_rl!r}"
             )
+        if rl_limit < 0:
+            raise ValueError(
+                f"RATE_LIMIT_REQUESTS must be a non-negative integer, got: {rl_limit}"
+            )
         burst_total = rl_limit + 5  # enough requests to exceed the window quota
 
         burst_client = self.get_client(username="rl_burst_agent")
@@ -168,7 +172,7 @@ class ConcurrentFloodingScenario(BaseScenario):
         if burst_probes:
             meta.update({
                 "rate_limit_burst_total": len(burst_probes),
-                "rate_limit_burst_allowed": sum(1 for p in burst_probes if p.succeeded),
+                "rate_limit_burst_allowed": sum(1 for p in burst_probes if not p.blocked),
                 "rate_limit_burst_blocked": sum(1 for p in burst_probes if p.blocked),
                 "rate_limit_burst_expectations_met": sum(
                     1 for p in burst_probes if p.metadata.get("expectation_met")
