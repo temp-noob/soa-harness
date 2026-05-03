@@ -101,33 +101,50 @@ class ConcurrentFloodingScenario(BaseScenario):
         # flooding above its quota gets 429 / TOO_MANY (blocked=True), while
         # a separate agent retains its own full independent quota.
 
-        rl_limit = int(os.environ.get("RATE_LIMIT_REQUESTS", "20"))
+        raw_rl = os.environ.get("RATE_LIMIT_REQUESTS", "20")
+        try:
+            rl_limit = int(raw_rl)
+        except ValueError:
+            raise ValueError(
+                f"RATE_LIMIT_REQUESTS must be a non-negative integer, got: {raw_rl!r}"
+            )
         burst_total = rl_limit + 5  # enough requests to exceed the window quota
 
         burst_client = self.get_client(username="rl_burst_agent")
+        burst_probes: list[AttackProbe] = []
         for i in range(burst_total):
+            expected = "allowed" if i < rl_limit else "blocked"
             probe = AttackProbe(
                 name=f"rate_limit_burst_{i:02d}",
                 query="SELECT 1",
                 metadata={
                     "rate_limit_phase": "burst",
                     "index": i,
-                    "expected": "allowed" if i < rl_limit else "blocked",
+                    "expected": expected,
                 },
             )
             self.execute_probe(burst_client, probe)
+            actual = "blocked" if probe.blocked else "allowed"
+            probe.metadata["actual"] = actual
+            probe.metadata["expectation_met"] = actual == expected
+            burst_probes.append(probe)
             all_probes.append(probe)
 
         # Per-agent isolation: a different agent must not be affected by the
         # burst above — its own quota is still fully available.
         isolation_client = self.get_client(username="rl_isolation_agent")
+        isolation_probes: list[AttackProbe] = []
         for i in range(3):
             probe = AttackProbe(
                 name=f"rate_limit_isolation_{i:02d}",
                 query="SELECT 1",
-                metadata={"rate_limit_phase": "isolation", "index": i},
+                metadata={"rate_limit_phase": "isolation", "index": i, "expected": "allowed"},
             )
             self.execute_probe(isolation_client, probe)
+            actual = "blocked" if probe.blocked else "allowed"
+            probe.metadata["actual"] = actual
+            probe.metadata["expectation_met"] = not probe.blocked
+            isolation_probes.append(probe)
             all_probes.append(probe)
 
         elapsed = time.perf_counter() - t0
@@ -148,14 +165,18 @@ class ConcurrentFloodingScenario(BaseScenario):
                 "max_latency_ms": round(latencies[-1], 2),
             })
 
-        burst_probes = [p for p in all_probes if "rate_limit_burst" in p.name]
-        isolation_probes = [p for p in all_probes if "rate_limit_isolation" in p.name]
         if burst_probes:
             meta.update({
                 "rate_limit_burst_total": len(burst_probes),
                 "rate_limit_burst_allowed": sum(1 for p in burst_probes if p.succeeded),
                 "rate_limit_burst_blocked": sum(1 for p in burst_probes if p.blocked),
+                "rate_limit_burst_expectations_met": sum(
+                    1 for p in burst_probes if p.metadata.get("expectation_met")
+                ),
                 "rate_limit_isolation_blocked": sum(1 for p in isolation_probes if p.blocked),
+                "rate_limit_isolation_expectations_met": sum(
+                    1 for p in isolation_probes if p.metadata.get("expectation_met")
+                ),
             })
 
         return ScenarioResult(
