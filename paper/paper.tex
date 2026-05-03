@@ -239,37 +239,47 @@ benchmark tracks:
 \subsection{Agentic Workload Characteristics}
 
 Liu \etal~\cite{liu2025sao} analyze agent interactions with data systems on the
-BIRD benchmark~\cite{li2024bird} and identify four distinguishing
-characteristics of agentic workloads:
+BIRD benchmark~\cite{li2024bird} and multi-database tasks and identify four
+distinguishing characteristics of agentic workloads:
 
 \begin{description}[leftmargin=*,labelwidth=1.5cm]
   \item[Scale.]
     Agents generate orders-of-magnitude more queries than human analysts per
     task, driven by iterative exploration and trial-and-error solution
-    formulation.
+    formulation.  In the \sysname benchmark, baseline agents (without
+    middleware) issue an average of 7.9~queries per analytical task, of which
+    47.5\% are schema-exploration probes that never contribute to the final
+    answer.
 
   \item[Heterogeneity.]
-    Agent probes span a wide spectrum: coarse-grained metadata discovery,
-    partial query attempts, schema exploration, and final analytical
-    computation. \todo{Add specific percentages from SAO paper Table~1.}
+    Agent probes span a wide spectrum: coarse-grained metadata discovery
+    (\texttt{system.columns}, \texttt{information\_schema}), partial query
+    attempts that test column availability, and final analytical computation.
+    Liu \etal{} observe that agents follow overlapping phases---metadata
+    exploration, statistics gathering, and solution formulation---rather
+    than a linear pipeline.
 
   \item[Redundancy.]
     Across sessions and agents, many probes access similar data or perform
-    overlapping operations. Schema-discovery queries (\texttt{SHOW TABLES},
-    \texttt{DESCRIBE}, \texttt{SELECT * LIMIT 5}) account for 80--90\% of
-    total probes.
+    overlapping operations. Liu \etal{} find that distinct sub-plans
+    across 50~parallel agent attempts comprise less than 10--20\% of total
+    work, indicating 80--90\% redundancy.  Providing semantic hints reduced
+    schema-exploration queries by 14--37\% depending on the exploration phase.
 
   \item[Steerability.]
     Unlike traditional query interfaces that return only results or errors,
     agents can consume and act on richer feedback---query suggestions,
-    constraint explanations, and semantic metadata---if the data system provides
-    it.
+    access-level annotations, constraint explanations, and semantic
+    metadata---if the data system provides it.  The \sysname explore-endpoint
+    ablation (\S\ref{sec:explore-ablation}) confirms this: agents with
+    curated schema context succeed on 100\% of tasks; without it, they
+    succeed on only 12.5\%.
 \end{description}
 
 These characteristics motivate a middleware layer that addresses redundancy
 through proactive metadata exposure, leverages steerability through structured
-feedback, and imposes security constraints that understand agent intent rather
-than merely restricting column access.
+feedback, governs agent resource consumption, and imposes security constraints
+that understand agent intent rather than merely restricting column access.
 
 \subsection{Limitations of Existing Approaches}
 \label{sec:limitations}
@@ -285,13 +295,36 @@ lacks intent-aware access control.
 RBAC~\cite{sandhu1996rbac} and fine-grained access control
 systems~\cite{rizvi2004extending} enforce policies at the row, column, or
 view level. These mechanisms cannot distinguish between query intents over the
-same column. \todo{Add specific example showing RBAC failure mode.}
+same column.  For example, consider a \texttt{transactions} table with an
+\texttt{amount\_cents} column classified as financial data.  Under RBAC, an
+administrator must either grant access to the column (exposing individual
+transaction amounts) or revoke it (preventing even aggregate revenue
+analysis).  Intent-based access control resolves this by allowing
+\texttt{SELECT category, AVG(amount\_cents) FROM transactions GROUP BY
+category} (aggregate, low privacy risk) while blocking \texttt{SELECT
+customer\_id, amount\_cents FROM transactions LIMIT 100} (row-level, high
+privacy risk).
 
 \paragraph{Query guardrails.}
 LLM guardrail frameworks~\cite{rebedea2023nemo} operate at the prompt level,
 filtering natural-language inputs before they reach the model. They do not
-inspect generated SQL and cannot enforce data-level policies.
-\todo{Expand with additional guardrail systems.}
+inspect the \emph{generated} SQL and cannot enforce data-level policies.
+An agent that passes a benign natural-language prompt through a guardrail may
+still generate SQL that exfiltrates PII, issues DDL commands, or floods the
+system with expensive queries.  The guardrail layer and the data-access layer
+are decoupled, leaving a gap that the middleware closes by inspecting every
+query at the SQL AST level before it reaches the database.
+
+\paragraph{Resource management.}
+OLAP systems such as ClickHouse~\cite{clickhouse2024} offer per-user resource
+governors---maximum memory, execution time, and thread limits.  These are
+static limits configured at the user level, designed for environments with tens
+of concurrent human analysts.  They cannot dynamically throttle individual
+agents within a shared credential, enforce per-agent request budgets, or
+provide backoff signals (\texttt{Retry-After} headers) that enable agents to
+self-regulate.  The middleware layer addresses this gap by binding each agent
+to a principal identity and enforcing sliding-window rate limits independently
+of the OLAP engine's resource governors.
 
 
 % =====================================================================
@@ -301,22 +334,18 @@ inspect generated SQL and cannot enforce data-level policies.
 \label{sec:architecture}
 
 Figure~\ref{fig:architecture} shows the \sysname architecture. The middleware
-interposes between LLM agents and a ClickHouse~\cite{clickhouse2024} OLAP
-backend via a transparent HTTP proxy. Three services compose the middleware
-layer.
+interposes between LLM agents and the OLAP backend via a transparent HTTP
+proxy. Four services compose the middleware layer.
 
 \begin{figure}[t]
   \centering
-  % \includegraphics[width=\columnwidth]{figures/architecture.pdf}
-  \fbox{\parbox{0.9\columnwidth}{\centering\vspace{3em}
-    \todo{Insert architecture diagram showing:\\
-    Agent $\rightarrow$ HTTP Proxy $\rightarrow$ [Access Control | Query Learning | Explore] $\rightarrow$ ClickHouse}
-  \vspace{3em}}}
+  \includegraphics[width=\columnwidth]{figures/architecture.pdf}
   \caption{%
-    \sysname architecture. The middleware sits between LLM agents and
-    ClickHouse, providing intent-based access control, session-based query
-    learning, and a curated explore endpoint. Existing tools
-    (\texttt{clickhouse\_connect}) connect through the proxy unmodified.
+    \sysname architecture.  The middleware interposes between LLM agents
+    and the OLAP database via an OLAP-compatible HTTP proxy.  Four services
+    compose the middleware: intent-based access control, session-based query
+    learning, a curated explore endpoint, and agent resource governance.
+    Existing database clients connect through the proxy unmodified.
   }
   \label{fig:architecture}
 \end{figure}
@@ -398,37 +427,42 @@ query was blocked and \emph{what} modifications would make it permissible (\eg,
 \label{sec:learning}
 
 Agentic workloads exhibit high redundancy: agents tackling similar analytical
-objectives issue overlapping query sequences. \sysname captures this
+objectives issue overlapping query sequences.  \sysname captures this
 redundancy through session-based query learning.
 
 \paragraph{Session lifecycle.}
 An agent opens a session by providing a natural-language description of its
-analytical objective (\eg, ``Analyze Q3 revenue trends by region''). During the
-session, the agent executes queries and provides relevance feedback (explicit
-ratings or implicit signals such as using query results in subsequent
-computation). When the session closes, \sysname persists the session as an
-embedding in ChromaDB~\cite{chromadb2023}.
+analytical objective (\eg, ``Analyze Q3 revenue trends by region'').  During
+the session, the agent executes queries and provides relevance feedback---a
+boolean signal indicating whether each query's result was useful, optionally
+accompanied by a free-text note.  When the session closes, \sysname computes
+an embedding of the session description and persists the session (description
+embedding, query--feedback tuples) in a vector store.
 
 \paragraph{Knowledge transfer.}
-When a new agent opens a session with a similar description, \sysname performs
-a top-$K$ similarity search over the embedding store and returns the most
-relevant past queries along with their outcomes and relevance scores. This
-enables cross-agent knowledge transfer: an agent benefits from the exploration
-already performed by prior agents with similar goals.
+When a new agent opens a session, \sysname performs a top-$K$ similarity
+search over stored session embeddings and returns the most relevant past
+queries.  Only queries with positive feedback are surfaced, ensuring that
+the knowledge base is curated rather than a raw dump of all prior queries.
+Negatively-reviewed queries that were blocked by access control are also
+returned as warnings, helping agents avoid known policy violations.
 
-\begin{figure}[t]
-  \centering
-  \fbox{\parbox{0.9\columnwidth}{\centering\vspace{3em}
-    \todo{Insert query learning flow diagram showing:\\
-    Session open $\rightarrow$ Query execution with feedback $\rightarrow$
-    Embedding persistence $\rightarrow$ Similarity retrieval for new sessions}
-  \vspace{3em}}}
-  \caption{%
-    Session-based query learning. Sessions are embedded and persisted,
-    enabling cross-agent knowledge transfer via similarity search.
-  }
-  \label{fig:learning}
-\end{figure}
+\paragraph{Cross-task transfer.}
+Because retrieval is embedding-based rather than keyword-based, knowledge
+transfers across related but distinct tasks.  An agent solving
+``revenue by product category'' stores queries against the \texttt{revenue\_daily}
+table.  A subsequent agent solving ``refund rate by category''---a different
+analytical question over the same table---receives those queries as relevant
+context.  In experiments (\S\ref{sec:cross-task}), this cross-task transfer
+reduces queries by 90\% compared to baseline.
+
+\paragraph{Saturation dynamics.}
+Session learning exhibits a saturation curve: the marginal value of each
+additional stored session diminishes as the embedding store fills.  In
+practice (\S\ref{sec:saturation}), similar-query retrieval saturates at
+$K{=}6$ queries after approximately 7~sequential agents, after which
+additional sessions add no new information.  Token consumption stabilizes
+at this point as well.
 
 % ----- 3.3 Explore Endpoint -----
 \subsection{Curated Explore Endpoint}
@@ -436,24 +470,60 @@ already performed by prior agents with similar goals.
 
 The explore endpoint directly addresses the \emph{redundancy} characteristic
 by proactively surfacing the metadata that agents would otherwise discover
-through iterative probing. For each table, the endpoint returns:
+through iterative probing.  For each table accessible to the agent, the
+endpoint returns:
 
 \begin{itemize}[leftmargin=*]
   \item \textbf{Table descriptions}: Human-authored summaries of table purpose
         and contents.
   \item \textbf{Column semantics}: Data types, natural-language descriptions,
-        sensitivity classifications, and access-level annotations.
-  \item \textbf{Statistics}: Row counts, cardinality estimates, value
-        distributions, and null percentages.
-  \item \textbf{Sample queries}: Curated example queries demonstrating common
-        access patterns and join strategies.
+        sensitivity classifications, and \emph{access-level annotations}
+        (\eg, \texttt{full}, \texttt{aggregation\_only}, \texttt{denied}).
+  \item \textbf{Statistics}: Row counts and basic column statistics
+        (min, max, average) for accessible columns.
+  \item \textbf{Sample queries}: Curated example queries demonstrating
+        policy-compliant access patterns.
   \item \textbf{Join recommendations}: Pre-computed join paths between tables
-        with foreign-key annotations and recommended join conditions.
+        with foreign-key annotations.
 \end{itemize}
 
-Critically, the explore endpoint is \emph{access-controlled}: an agent sees
-only the metadata for columns and tables its role is permitted to access. This
-prevents information leakage through metadata channels.
+The explore endpoint is \emph{access-controlled}: tables the agent has no
+access to are omitted entirely, and restricted columns are annotated with
+their access level rather than hidden.  This design serves dual purpose:
+\emph{schema discovery} (what tables and columns exist) and \emph{policy
+guidance} (how to query within access constraints).  For example, a column
+marked \texttt{aggregation\_only} teaches the agent to use
+\texttt{AVG(column)} rather than \texttt{SELECT column}---turning access
+control from a brick wall into a navigable constraint.  The ablation study
+in \S\ref{sec:explore-ablation} confirms this: without explore, even GPT-4o
+abandons tasks after hitting policy blocks, interpreting them as hard denials
+rather than formulation guidance.
+
+% ----- 3.4 Resource Governance -----
+\subsection{Agent Resource Governance}
+\label{sec:governance}
+
+The middleware's position as an interposition layer enables resource governance
+that the OLAP engine cannot provide natively.  Each agent is bound to a
+principal identity---regardless of how many sessions or connections it
+opens---and subjected to three governance mechanisms:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Per-agent rate limiting}: A sliding-window rate limiter
+        tracks each agent's query frequency independently.  When the limit
+        is exceeded, the middleware returns HTTP~429 with a
+        \texttt{Retry-After} header, enabling well-behaved agents to back
+        off automatically.
+  \item \textbf{Audit logging}: Every query is logged with the agent's
+        identity, the tables and columns accessed, the access-control
+        decision, execution time, and rows read.  This enables
+        retrospective analysis of agent behavior patterns.
+  \item \textbf{Query interception}: Because every query passes through
+        the middleware before reaching the OLAP engine, dangerous functions
+        (\texttt{url()}, \texttt{file()}, \texttt{remote()}) and system
+        commands (\texttt{SYSTEM SHUTDOWN}, \texttt{KILL QUERY}) are
+        blocked before they consume cluster resources.
+\end{itemize}
 
 
 % =====================================================================
@@ -462,8 +532,10 @@ prevents information leakage through metadata channels.
 \section{Implementation}
 \label{sec:implementation}
 
-\sysname is implemented in \todo{lines of code} of Python. Table~\ref{tab:stack}
-summarizes the technology stack.
+The \sysname implementation, benchmark harness, and all experimental scripts
+are available at
+\texttt{https://github.com/temp-noob/soa-harness}.
+Table~\ref{tab:stack} summarizes the technology stack.
 
 \begin{table}[t]
   \centering
@@ -473,36 +545,51 @@ summarizes the technology stack.
     \toprule
     \textbf{Component} & \textbf{Technology} \\
     \midrule
-    OLAP Engine         & ClickHouse \\
-    HTTP Proxy          & \todo{FastAPI / aiohttp / custom} \\
+    OLAP Engine         & ClickHouse 24.8 (2-shard, 2-replica) \\
+    HTTP Proxy          & FastAPI + Uvicorn (async) \\
     SQL Parsing         & sqlglot \\
-    Embedding Store     & ChromaDB \\
-    Embedding Model     & \todo{Model name and dimensionality} \\
-    Agent (Benchmarks)  & Qwen-3.5 (local) \\
+    Embedding Store     & ChromaDB (v1.0, HTTP API) \\
+    Embedding Model     & Configurable (OpenAI-compatible API) \\
+    Agent Models        & GPT-4o, GPT-4o-mini, Qwen-3.5 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
 \paragraph{Deployment model.}
-The middleware deploys as a single-process HTTP server that accepts
-ClickHouse-compatible HTTP protocol requests. Agents configured with
+The middleware deploys as a containerized HTTP server that accepts
+OLAP-compatible HTTP protocol requests.  In the evaluation, it proxies
+ClickHouse's HTTP interface; agents configured with
 \texttt{clickhouse\_connect} or any ClickHouse HTTP client require only a
-change in endpoint URL; no client-side code modifications are needed.
+change in endpoint URL.  The middleware, OLAP cluster, and vector store are
+orchestrated via Docker Compose.
 
 \paragraph{SQL parsing and intent classification.}
 \sysname uses \texttt{sqlglot}~\cite{sqlglot2023} to parse incoming SQL into a
-full AST. The intent classifier traverses the AST to determine whether
-aggregate functions are applied to sensitive columns. Subquery and CTE
-structures are analyzed recursively to prevent intent-masking attacks
-(\eg, wrapping a row-level select inside a trivial aggregation).
+full AST.  The intent classifier detects the presence of aggregate functions
+(\texttt{COUNT}, \texttt{SUM}, \texttt{AVG}, etc.) and \texttt{GROUP BY}
+clauses to distinguish \texttt{AGGREGATE} intent from \texttt{SELECT\_ROW}.
+DDL and DML statements are identified by keyword prefix.  Dangerous
+table-valued functions (\texttt{url()}, \texttt{file()}, \texttt{remote()})
+are detected and blocked before AST analysis.
 
 \paragraph{Session embedding.}
-Session descriptions and query sequences are embedded using \todo{embedding
-model name}. Embeddings are stored in ChromaDB with metadata including session
-timestamps, query outcomes, and relevance feedback. Retrieval uses cosine
-similarity with $K = \todo{value}$.
+Session descriptions are embedded via a configurable OpenAI-compatible
+embedding API (set via the \texttt{EMBEDDING\_API\_URL} environment variable).
+When no API is configured, a lightweight local trigram-hash function produces
+64-dimensional unit-norm vectors as a fallback.  Embeddings are stored in
+ChromaDB via its REST API, with metadata including the agent~ID, session
+timestamp, query--feedback tuples (as JSON), and query count.  Retrieval uses
+cosine similarity with $K{=}6$.
 
-\todo{Add paragraph on resource registry configuration and schema annotation.}
+\paragraph{Resource registry.}
+The resource registry is a YAML configuration file that annotates every table
+and column in the schema with a sensitivity classification (\texttt{PII},
+\texttt{FINANCIAL}, \texttt{BUSINESS\_SECRET}, \texttt{SYSTEM}, or
+\texttt{SAFE}) and a human-readable description.  Access policies are
+defined in a separate YAML file that maps agent roles to permitted
+(intent, sensitivity) combinations.  Both files are loaded at startup and
+can be updated without restarting the middleware by calling the
+\texttt{/explore/refresh} endpoint.
 
 
 % =====================================================================
