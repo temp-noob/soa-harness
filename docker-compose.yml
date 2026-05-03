@@ -144,6 +144,9 @@ services:
       - EMBEDDING_API_URL=http://host.docker.internal:11434/v1
       - EMBEDDING_API_KEY=
       - EMBEDDING_MODEL=embeddinggemma
+      # Rate limiting: max queries per agent per window
+      - RATE_LIMIT_REQUESTS=20
+      - RATE_LIMIT_WINDOW_S=60
     networks:
       - sao-net
     depends_on:
