@@ -64,21 +64,12 @@
 \title{Agent-First Middleware for OLAP Systems: \\
        Intent-Based Access Control, Query Learning, and Schema Discovery}
 
-\author{\todo{Author 1}}
+\author{Mohit Tripathi}
 \affiliation{%
-  \institution{\todo{Institution}}
-  \city{\todo{City}}
-  \country{\todo{Country}}
+  \institution{Bloomberg}
 }
-\email{\todo{email@institution.edu}}
+\email{mtripathi15@bloomberg.net}
 
-\author{\todo{Author 2}}
-\affiliation{%
-  \institution{\todo{Institution}}
-  \city{\todo{City}}
-  \country{\todo{Country}}
-}
-\email{\todo{email@institution.edu}}
 
 % Add more authors as needed
 
@@ -97,28 +88,35 @@ per session. Liu \etal~\cite{liu2025sao} characterize agentic workloads by
 four properties---\emph{scale}, \emph{heterogeneity}, \emph{redundancy}, and
 \emph{steerability}---and call for redesigning data systems to be agent-first.
 
-We present \sysname, a transparent middleware layer that sits between LLM agents
-and ClickHouse OLAP databases. \sysname introduces three mechanisms:
+This work presents \sysname, a transparent middleware layer that sits between
+LLM agents and OLAP databases.  \sysname introduces three mechanisms:
 (1)~\emph{intent-based access control} that parses SQL ASTs to enforce policies
-at the semantic level (\eg, allowing aggregations over PII columns while
+at the semantic level (\eg, allowing aggregations over sensitive columns while
 blocking row-level access);
 (2)~\emph{session-based query learning} that persists agent sessions as
-embeddings and surfaces relevant past queries to new agents with similar goals;
-and
+embeddings and surfaces relevant past queries to new agents with similar
+goals, enabling cross-task knowledge transfer; and
 (3)~a curated \emph{explore endpoint} that provides schema metadata, column
-semantics, statistics, and join recommendations, eliminating the redundant
-schema-discovery queries that dominate agentic workloads.
+semantics, access-level annotations, and sample queries, eliminating the
+redundant schema-discovery queries that dominate agentic workloads.
 
-We evaluate \sysname on two benchmark tracks.
-A \emph{security benchmark} (5 attack scenarios, 200 probes) shows that the
-middleware blocks 67 additional attacks, reducing PII leakage from 300 to 0
-rows.
-An \emph{agent-efficiency benchmark} (8 analytical tasks, 3 runs, Qwen-3.5)
-reduces total queries by 49\% and eliminates all 106 schema-exploration queries,
-though token consumption increases 186\% due to retry loops on policy-blocked
-queries---a limitation we discuss and scope to small local models.
-
-\todo{Finalize abstract once all results are confirmed.}
+\sysname is evaluated on a distributed ClickHouse cluster with two benchmark
+tracks.
+A \emph{security benchmark} (5~attack scenarios, 200~probes) shows that the
+middleware blocks 67~additional attacks versus unprotected ClickHouse,
+reducing PII leakage from 300 to~0 rows.
+An \emph{agent-efficiency benchmark} (8~analytical tasks, 3~models, up to
+10~sequential agents per task) demonstrates that the middleware reduces total
+queries hitting the OLAP system by 74.5\% (200$\to$51) and eliminates all
+95~schema-exploration queries.  An explore-endpoint ablation shows that
+without the endpoint, task success drops from 100\% to 12.5\%, confirming
+that the explore layer is the foundational enabler for policy-compliant agent
+interactions.  Cross-task transfer experiments show that queries stored by
+agents solving one task reduce queries for semantically related tasks by 90\%.
+Agent capability matters: GPT-4o achieves 62.5\% accuracy in 1.1~queries on
+average, GPT-4o-mini achieves 45.8\% in 3.5~queries, while Qwen-3.5 scores
+25\% despite the same middleware support, indicating that agent-first
+middleware amplifies model capability rather than leveling it.
 \end{abstract}
 
 \maketitle
@@ -141,7 +139,7 @@ schema-discovery patterns across sessions), and latent
 \emph{steerability} (responding to richer feedback than simple error
 messages)~\cite{liu2025sao}.
 
-This shift exposes two critical gaps in current OLAP architectures.
+This shift exposes three critical gaps in current OLAP architectures.
 
 \paragraph{Security.}
 Traditional role-based access control (RBAC)~\cite{sandhu1996rbac} operates at
@@ -153,6 +151,17 @@ same column. Current systems cannot distinguish between these intents, forcing
 administrators into a binary choice between permitting all access (risking PII
 leakage) or blocking the column entirely (crippling legitimate analytics).
 
+\paragraph{Resource governance.}
+Unlike human analysts who self-regulate query frequency, agent swarms can flood
+an OLAP cluster with hundreds of concurrent requests---mixing expensive
+analytical scans with speculative exploration probes.  Most OLAP systems offer
+per-user resource governors (max memory, max threads), but these are static
+limits designed for tens of concurrent users, not for dynamically managing
+thousands of agents.  There is no concept of binding an agent to a principal
+identity across sessions, capping its concurrent queries, or throttling its
+request rate with backoff signals.  Without such governance, a single
+misconfigured agent loop can degrade query latency for the entire cluster.
+
 \paragraph{Efficiency.}
 Liu \etal~\cite{liu2025sao} observe that 80--90\% of agent queries in
 text-to-SQL benchmarks are redundant schema-exploration
@@ -163,32 +172,62 @@ yield information the data system already possesses. No mechanism exists to
 proactively surface this metadata in a form agents can directly consume.
 
 \medskip
-We present \sysname, a transparent middleware layer that addresses both gaps
-without modifying the underlying OLAP engine. \sysname contributes three
+This work presents \sysname, a transparent middleware layer that addresses these
+gaps without modifying the underlying OLAP engine.  \sysname contributes four
 mechanisms:
 
 \begin{enumerate}[leftmargin=*]
   \item \textbf{Intent-based access control} (\S\ref{sec:access}): SQL AST
         parsing with \texttt{sqlglot}~\cite{sqlglot2023} classifies query
-        intent and enforces policies at the semantic level.
+        intent and enforces policies at the semantic level---allowing
+        aggregations over sensitive columns while blocking row-level access
+        to the same data.
 
   \item \textbf{Session-based query learning} (\S\ref{sec:learning}):
-        Agent sessions are embedded and persisted in
-        ChromaDB~\cite{chromadb2023}, enabling cross-agent knowledge transfer
-        for agents with similar analytical goals.
+        Agent sessions are embedded and persisted in a vector store,
+        enabling cross-agent and cross-task knowledge transfer.  Queries
+        validated by one agent are surfaced to future agents with
+        semantically similar goals.
 
   \item \textbf{Curated explore endpoint} (\S\ref{sec:explore}):
-        Access-controlled schema metadata, statistics, sample queries, and
-        join recommendations eliminate redundant exploration.
+        Access-controlled schema metadata enriched with column semantics,
+        access-level annotations, and sample queries eliminates redundant
+        exploration.  Critically, the explore endpoint serves dual
+        purpose: schema discovery \emph{and} policy guidance, teaching
+        agents how to formulate compliant queries rather than merely
+        blocking non-compliant ones.
+
+  \item \textbf{Agent resource governance} (\S\ref{sec:governance}):
+        Each agent is bound to a single principal with per-agent rate
+        limits, concurrent query caps, and full audit logging---regardless
+        of how many sessions or connections it opens.  Rate-limited
+        requests receive \texttt{Retry-After} headers, enabling
+        well-behaved agents to back off gracefully rather than overloading
+        the cluster.
 \end{enumerate}
 
-\sysname deploys as a ClickHouse-compatible HTTP proxy, requiring zero changes
-to existing agent tooling (\eg, \texttt{clickhouse\_connect}). We evaluate it
-on a security benchmark (5 attack scenarios, 200 probes) and an agent
-efficiency benchmark (8 analytical tasks, Qwen-3.5), demonstrating significant
-improvements in both dimensions.
+By design, the middleware architecture places a protective layer between
+agents and the OLAP cluster.  Every query passes through access control,
+rate limiting, and audit logging before reaching the database---shielding
+the cluster from both malicious and accidental abuse.  \sysname deploys as
+an OLAP-compatible HTTP proxy, requiring zero changes to existing agent
+tooling.  It is evaluated on a distributed ClickHouse cluster across two
+benchmark tracks:
 
-\todo{Add forward references to specific result highlights.}
+\begin{itemize}[leftmargin=*]
+  \item A \emph{security benchmark} (5~attack scenarios, 200~probes) in
+        which the middleware blocks 67~additional attacks and eliminates all
+        PII leakage (300$\to$0~rows; \S\ref{sec:security-eval}).
+
+  \item An \emph{agent-efficiency benchmark} (8~analytical tasks, 3~LLM
+        models, up to 10~sequential agents) that reduces queries hitting the
+        OLAP system by 74.5\% and eliminates all 95~schema-exploration
+        queries (\S\ref{sec:agent-eval}).  An ablation study shows that
+        removing the explore endpoint drops task success from 100\% to 12.5\%
+        (\S\ref{sec:explore-ablation}), and cross-task transfer experiments
+        demonstrate a 90\% query reduction when agents benefit from prior
+        sessions on related tasks (\S\ref{sec:cross-task}).
+\end{itemize}
 
 
 % =====================================================================
