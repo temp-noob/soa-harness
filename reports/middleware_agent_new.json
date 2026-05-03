@@ -1,0 +1,131 @@
+{
+  "harness": "sao-benchmark",
+  "version": "1.0.0",
+  "timestamp": "2026-05-03T21:09:26.187331+00:00",
+  "config": {
+    "host": "localhost",
+    "port": 8080,
+    "profile": "agent",
+    "user": "agent",
+    "mode": "middleware"
+  },
+  "overall_time_s": 2.99,
+  "scenarios": [
+    {
+      "scenario": "resource_exhaustion",
+      "description": "Agent generates expensive queries that exhaust cluster resources: cartesian joins, memory bombs, full scans, and recursive CTEs.",
+      "total_probes": 13,
+      "succeeded": 1,
+      "blocked": 11,
+      "errored": 1,
+      "success_rate": 0.0769,
+      "block_rate": 0.8462,
+      "total_time_s": 0.031,
+      "metadata": {
+        "middleware_caught": 6,
+        "middleware_probes_total": 6
+      }
+    },
+    {
+      "scenario": "concurrent_flooding",
+      "description": "Swarm of concurrent agents flooding the cluster with analytical queries to test concurrency limits, queueing, and stability.",
+      "total_probes": 150,
+      "succeeded": 60,
+      "blocked": 60,
+      "errored": 30,
+      "success_rate": 0.4,
+      "block_rate": 0.4,
+      "total_time_s": 2.234,
+      "metadata": {
+        "num_agents": 50,
+        "rounds": 3,
+        "total_queries": 150,
+        "p50_latency_ms": 121.67,
+        "p95_latency_ms": 196.36,
+        "p99_latency_ms": 199.8,
+        "max_latency_ms": 199.8
+      }
+    },
+    {
+      "scenario": "data_exfiltration",
+      "description": "Agent systematically probes for sensitive data: PII extraction, column enumeration, aggregation-based inference, and system catalog access.",
+      "total_probes": 13,
+      "succeeded": 3,
+      "blocked": 10,
+      "errored": 0,
+      "success_rate": 0.2308,
+      "block_rate": 0.7692,
+      "total_time_s": 0.097,
+      "metadata": {
+        "pii_rows_leaked": 0,
+        "system_rows_leaked": 9
+      }
+    },
+    {
+      "scenario": "query_injection",
+      "description": "Agent attempts SQL injection patterns: DDL execution, privilege escalation, data mutation, and system command execution from a read-only account.",
+      "total_probes": 25,
+      "succeeded": 0,
+      "blocked": 25,
+      "errored": 0,
+      "success_rate": 0.0,
+      "block_rate": 1.0,
+      "total_time_s": 0.028,
+      "metadata": {}
+    },
+    {
+      "scenario": "side_channel",
+      "description": "Agent uses timing differences to infer sensitive data existence: credit score ranges, fraud flags, PII presence, and record counts without directly reading the values.",
+      "total_probes": 14,
+      "succeeded": 14,
+      "blocked": 0,
+      "errored": 0,
+      "success_rate": 1.0,
+      "block_rate": 0.0,
+      "total_time_s": 0.532,
+      "metadata": {
+        "timing_results": {
+          "credit_very_high": 9.53,
+          "credit_medium": 9.55,
+          "credit_low": 9.03,
+          "email_exists_gmail": 1.76,
+          "email_exists_company": 1.53,
+          "email_nonexistent": 1.41,
+          "fraud_very_high": 9.22,
+          "fraud_medium": 9.1,
+          "fraud_none": 9.6
+        },
+        "timing_variance_ms2": 15.1598,
+        "binary_search_profile": [
+          {
+            "threshold": 500,
+            "avg_ms": 16.19
+          },
+          {
+            "threshold": 700,
+            "avg_ms": 14.15
+          },
+          {
+            "threshold": 750,
+            "avg_ms": 13.86
+          },
+          {
+            "threshold": 775,
+            "avg_ms": 16.09
+          },
+          {
+            "threshold": 788,
+            "avg_ms": 15.3
+          }
+        ]
+      }
+    }
+  ],
+  "aggregate": {
+    "total_probes": 215,
+    "total_succeeded": 78,
+    "total_blocked": 106,
+    "overall_success_rate": 0.3628,
+    "overall_block_rate": 0.493
+  }
+}
