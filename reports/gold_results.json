@@ -1,0 +1,447 @@
+{
+  "revenue_by_category": {
+    "task_id": "revenue_by_category",
+    "question": "What is the total revenue (in USD) by product category for completed transactions? Return category and total revenue, ordered by revenue descending.",
+    "gold_sql": "SELECT category, SUM(amount_cents) / 100 AS revenue_usd FROM sao.transactions_distributed WHERE status = 'completed' GROUP BY category ORDER BY revenue_usd DESC",
+    "headers": [
+      "category",
+      "revenue_usd"
+    ],
+    "rows": [
+      [
+        "sports",
+        "171474428.18"
+      ],
+      [
+        "clothing",
+        "170400420.06"
+      ],
+      [
+        "home_garden",
+        "170320147.94"
+      ],
+      [
+        "grocery",
+        "170060557.57"
+      ],
+      [
+        "automotive",
+        "169801866.38"
+      ],
+      [
+        "toys",
+        "169761712.76"
+      ],
+      [
+        "books",
+        "169677784.69"
+      ],
+      [
+        "health",
+        "169421759.25"
+      ],
+      [
+        "electronics",
+        "169406475.89"
+      ],
+      [
+        "jewelry",
+        "168906787.29"
+      ]
+    ],
+    "row_count": 10
+  },
+  "top_5_states": {
+    "task_id": "top_5_states",
+    "question": "Which are the top 5 states by number of enterprise-tier customers? Return state and count.",
+    "gold_sql": "SELECT state, COUNT(*) AS cnt FROM sao.customers_distributed WHERE tier = 'enterprise' GROUP BY state ORDER BY cnt DESC LIMIT 5",
+    "headers": [
+      "state",
+      "cnt"
+    ],
+    "rows": [
+      [
+        "CA",
+        "366"
+      ],
+      [
+        "NC",
+        "359"
+      ],
+      [
+        "GA",
+        "358"
+      ],
+      [
+        "AZ",
+        "356"
+      ],
+      [
+        "MO",
+        "352"
+      ]
+    ],
+    "row_count": 5
+  },
+  "daily_revenue_trend": {
+    "task_id": "daily_revenue_trend",
+    "question": "What is the daily total revenue (in USD) for the most recent 30 days in the revenue_daily table? Return date and total revenue.",
+    "gold_sql": "SELECT dt, SUM(total_amount) / 100 AS revenue_usd FROM sao.revenue_daily_distributed GROUP BY dt ORDER BY dt DESC LIMIT 30",
+    "headers": [
+      "dt",
+      "revenue_usd"
+    ],
+    "rows": [
+      [
+        "2026-05-02",
+        "950543.12"
+      ],
+      [
+        "2026-05-01",
+        "1311198.93"
+      ],
+      [
+        "2026-04-30",
+        "2629132.2"
+      ],
+      [
+        "2026-04-29",
+        "2728778.63"
+      ],
+      [
+        "2026-04-28",
+        "2806070.88"
+      ],
+      [
+        "2026-04-27",
+        "2615495.45"
+      ],
+      [
+        "2026-04-26",
+        "5039295.51"
+      ],
+      [
+        "2026-04-25",
+        "5578838.88"
+      ],
+      [
+        "2026-04-24",
+        "5670105.67"
+      ],
+      [
+        "2026-04-23",
+        "5625128.4"
+      ],
+      [
+        "2026-04-22",
+        "5378535.1"
+      ],
+      [
+        "2026-04-21",
+        "5354369.75"
+      ],
+      [
+        "2026-04-20",
+        "5759987.53"
+      ],
+      [
+        "2026-04-19",
+        "5447110.62"
+      ],
+      [
+        "2026-04-18",
+        "5498985.64"
+      ],
+      [
+        "2026-04-17",
+        "5390154.45"
+      ],
+      [
+        "2026-04-16",
+        "5473903.31"
+      ],
+      [
+        "2026-04-15",
+        "5249220.54"
+      ],
+      [
+        "2026-04-14",
+        "5342924.5"
+      ],
+      [
+        "2026-04-13",
+        "5359877.87"
+      ],
+      [
+        "2026-04-12",
+        "5511430.34"
+      ],
+      [
+        "2026-04-11",
+        "5576967.59"
+      ],
+      [
+        "2026-04-10",
+        "5553089.07"
+      ],
+      [
+        "2026-04-09",
+        "5485878.17"
+      ],
+      [
+        "2026-04-08",
+        "5731192.62"
+      ],
+      [
+        "2026-04-07",
+        "5258540.25"
+      ],
+      [
+        "2026-04-06",
+        "5129044.02"
+      ],
+      [
+        "2026-04-05",
+        "5414593.13"
+      ],
+      [
+        "2026-04-04",
+        "5607536.66"
+      ],
+      [
+        "2026-04-03",
+        "5508340.54"
+      ]
+    ],
+    "row_count": 30
+  },
+  "category_refund_rate": {
+    "task_id": "category_refund_rate",
+    "question": "What is the refund rate (refund_count / tx_count) by product category across all time? Return category and refund rate, ordered by refund rate descending.",
+    "gold_sql": "SELECT category, SUM(refund_count) / SUM(tx_count) AS refund_rate FROM sao.revenue_daily_distributed GROUP BY category ORDER BY refund_rate DESC",
+    "headers": [
+      "category",
+      "refund_rate"
+    ],
+    "rows": [
+      [
+        "automotive",
+        "0.08150842457877105"
+      ],
+      [
+        "electronics",
+        "0.08107395692122307"
+      ],
+      [
+        "books",
+        "0.08080505031564472"
+      ],
+      [
+        "grocery",
+        "0.08000399770132174"
+      ],
+      [
+        "clothing",
+        "0.07963710930218107"
+      ],
+      [
+        "toys",
+        "0.07961807382903541"
+      ],
+      [
+        "health",
+        "0.0796014302502938"
+      ],
+      [
+        "sports",
+        "0.07927351222598533"
+      ],
+      [
+        "jewelry",
+        "0.0783530360698712"
+      ],
+      [
+        "home_garden",
+        "0.07818724477690223"
+      ]
+    ],
+    "row_count": 10
+  },
+  "payment_method_breakdown": {
+    "task_id": "payment_method_breakdown",
+    "question": "What is the distribution of payment methods for completed transactions? Return payment method and percentage of total transactions, ordered by percentage descending.",
+    "gold_sql": "SELECT payment_method, COUNT(*) * 100.0 / (SELECT COUNT(*) FROM sao.transactions_distributed WHERE status = 'completed') AS pct FROM sao.transactions_distributed WHERE status = 'completed' GROUP BY payment_method ORDER BY pct DESC",
+    "headers": [
+      "payment_method",
+      "pct"
+    ],
+    "rows": [
+      [
+        "paypal",
+        "20.06238442564876"
+      ],
+      [
+        "credit_card",
+        "19.99667792643812"
+      ],
+      [
+        "debit_card",
+        "19.994032027141046"
+      ],
+      [
+        "bank_transfer",
+        "19.976980676115467"
+      ],
+      [
+        "crypto",
+        "19.969924944656608"
+      ]
+    ],
+    "row_count": 5
+  },
+  "customer_tier_revenue": {
+    "task_id": "customer_tier_revenue",
+    "error": "Code: 288. DB::Exception: Double-distributed IN/JOIN subqueries is denied (distributed_product_mode = 'deny'). You may rewrite query to use local tables in subqueries, or use GLOBAL keyword, or set di"
+  },
+  "monthly_growth": {
+    "task_id": "monthly_growth",
+    "question": "What is the month-over-month revenue growth rate? Using revenue_daily, compute total monthly revenue and the percentage change from the previous month. Return month, revenue, and growth rate.",
+    "gold_sql": "SELECT month, revenue_usd, round((revenue_usd - prev_revenue) / prev_revenue * 100, 2) AS growth_pct FROM (  SELECT toStartOfMonth(dt) AS month,   SUM(total_amount) / 100 AS revenue_usd,   lagInFrame(SUM(total_amount) / 100) OVER (ORDER BY toStartOfMonth(dt)) AS prev_revenue   FROM sao.revenue_daily_distributed   GROUP BY month   ORDER BY month) WHERE prev_revenue > 0",
+    "headers": [
+      "month",
+      "revenue_usd",
+      "growth_pct"
+    ],
+    "rows": [
+      [
+        "2025-05-01",
+        "167305276.78",
+        "1375.84"
+      ],
+      [
+        "2025-06-01",
+        "164096684.64",
+        "-1.92"
+      ],
+      [
+        "2025-07-01",
+        "170223804.82",
+        "3.73"
+      ],
+      [
+        "2025-08-01",
+        "169612894.98",
+        "-0.36"
+      ],
+      [
+        "2025-09-01",
+        "164280899.66",
+        "-3.14"
+      ],
+      [
+        "2025-10-01",
+        "168981241.05",
+        "2.86"
+      ],
+      [
+        "2025-11-01",
+        "164290804.33",
+        "-2.78"
+      ],
+      [
+        "2025-12-01",
+        "169988360.38",
+        "3.47"
+      ],
+      [
+        "2026-01-01",
+        "169044080.73",
+        "-0.56"
+      ],
+      [
+        "2026-02-01",
+        "154160437.93",
+        "-8.8"
+      ],
+      [
+        "2026-03-01",
+        "169999533.03",
+        "10.27"
+      ],
+      [
+        "2026-04-01",
+        "152865578.48",
+        "-10.08"
+      ],
+      [
+        "2026-05-01",
+        "2261742.05",
+        "-98.52"
+      ]
+    ],
+    "row_count": 13
+  },
+  "product_category_aov": {
+    "task_id": "product_category_aov",
+    "question": "What is the average order value (AOV) in USD by product category, and how many distinct products are in each category? Return category, AOV, and product count.",
+    "gold_sql": "SELECT t.category, AVG(t.amount_cents) / 100 AS aov_usd, COUNT(DISTINCT t.product_id) AS product_count FROM sao.transactions_distributed t WHERE t.status = 'completed' GROUP BY t.category ORDER BY aov_usd DESC",
+    "headers": [
+      "category",
+      "aov_usd",
+      "product_count"
+    ],
+    "rows": [
+      [
+        "toys",
+        "2501.351340248718",
+        "500"
+      ],
+      [
+        "home_garden",
+        "2501.323913822476",
+        "500"
+      ],
+      [
+        "electronics",
+        "2500.3169685922603",
+        "500"
+      ],
+      [
+        "sports",
+        "2498.279764267086",
+        "500"
+      ],
+      [
+        "books",
+        "2497.2813995143133",
+        "500"
+      ],
+      [
+        "grocery",
+        "2497.1448352471293",
+        "500"
+      ],
+      [
+        "jewelry",
+        "2497.0327645136967",
+        "500"
+      ],
+      [
+        "automotive",
+        "2496.865958591889",
+        "500"
+      ],
+      [
+        "clothing",
+        "2495.612478910369",
+        "500"
+      ],
+      [
+        "health",
+        "2492.5594628591607",
+        "500"
+      ]
+    ],
+    "row_count": 10
+  }
+}
