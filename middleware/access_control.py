@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import enum
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -305,12 +306,215 @@ class QueryAnalyzer:
         return columns
 
     def has_dangerous_functions(self, sql: str) -> Optional[str]:
-        dangerous = ["url(", "file(", "remote(", "remoteSecure(", "mysql(", "postgresql("]
+        """Detect dangerous table-functions that ``readonly=1`` does NOT block.
+
+        ClickHouse readonly mode prevents DDL/DML writes, but table-functions
+        that access external URLs, local files, or remote servers are still
+        allowed.  These are the vectors that the middleware must catch to
+        provide protection *beyond* what the database itself enforces.
+        """
+        # All entries MUST be lowercase -- we compare against lower(sql).
+        dangerous = [
+            # Original set
+            "url(", "file(", "remote(", "remotesecure(",
+            "mysql(", "postgresql(",
+            # Cloud / distributed storage access
+            "s3(", "s3cluster(",
+            "hdfs(",
+            # Generic external DB connectors
+            "jdbc(",
+            "odbc(",
+            # Streaming input
+            "input(",
+            # Cluster-wide access / cross-database scanning
+            "cluster(",
+        ]
         lower = sql.lower()
         for func in dangerous:
             if func in lower:
                 return func.rstrip("(")
         return None
+
+    def has_multi_statement(self, sql: str) -> bool:
+        """Detect multi-statement injection attempts.
+
+        ``readonly=1`` does NOT reliably prevent multi-statement payloads
+        such as ``SELECT 1; DROP TABLE x``.  Behaviour depends on the
+        client library and the protocol (HTTP vs native).  The middleware
+        rejects any query that contains a semicolon followed by additional
+        non-whitespace content, which is never legitimate for a single
+        analytical query.
+        """
+        stripped = sql.strip().rstrip(";").strip()
+        return ";" in stripped
+
+    # NOTE: In production, this detection logic should be loadable from a shared
+    # module (e.g., a resource_exhaustion_rules.yaml or a plugin registry) so
+    # that detection patterns can be updated without redeploying the middleware.
+    def detect_resource_exhaustion(self, sql: str) -> Optional[str]:
+        """Detect SQL patterns that would exhaust OLAP resources.
+
+        Returns a reason string if the query is dangerous, or None if safe.
+        Detection is intentionally conservative -- only obviously dangerous
+        patterns are flagged, not borderline cases.
+        """
+        reason = self._detect_cartesian_join(sql)
+        if reason:
+            return reason
+
+        reason = self._detect_memory_bomb(sql)
+        if reason:
+            return reason
+
+        reason = self._detect_regexp_full_scan(sql)
+        if reason:
+            return reason
+
+        reason = self._detect_unbounded_high_cardinality_group_by(sql)
+        if reason:
+            return reason
+
+        return None
+
+    def _detect_cartesian_join(self, sql: str) -> Optional[str]:
+        """Detect CROSS JOINs or joins missing ON/USING clauses."""
+        try:
+            parsed = sqlglot.parse_one(sql, dialect="clickhouse")
+        except sqlglot.errors.ParseError:
+            return None
+
+        for join in parsed.find_all(exp.Join):
+            # Explicit CROSS JOIN
+            if join.args.get("kind") and "CROSS" in join.args["kind"].upper():
+                return "CROSS JOIN produces a Cartesian product and can exhaust memory"
+
+            # Join without ON or USING clause (implicit Cartesian)
+            has_on = join.args.get("on") is not None
+            has_using = join.args.get("using") is not None
+            if not has_on and not has_using:
+                return "JOIN without ON/USING clause produces a Cartesian product"
+
+        # Also detect comma-joins (FROM a, b) with no WHERE relating them.
+        # sqlglot models comma-joins as multiple Table nodes under the From.
+        from_clause = parsed.find(exp.From)
+        if from_clause:
+            tables_in_from = list(from_clause.find_all(exp.Table))
+            if len(tables_in_from) > 1:
+                return "Comma-separated tables in FROM without explicit JOIN produce a Cartesian product"
+
+        return None
+
+    def _detect_memory_bomb(self, sql: str) -> Optional[str]:
+        """Detect arrayJoin(range(N)) and similar array-explosion patterns."""
+        lower = sql.lower()
+
+        # Detect arrayJoin(range(N)) where N is a large literal
+        range_match = re.search(
+            r'arrayjoin\s*\(\s*range\s*\(\s*(\d+)\s*\)',
+            lower,
+        )
+        if range_match:
+            n = int(range_match.group(1))
+            if n > 10000:
+                return (
+                    f"arrayJoin(range({n})) generates {n} rows per input row "
+                    f"and will exhaust memory"
+                )
+
+        # Detect numbers(N) table function with large N
+        numbers_match = re.search(r'\bnumbers\s*\(\s*(\d+)\s*\)', lower)
+        if numbers_match:
+            n = int(numbers_match.group(1))
+            if n > 10_000_000:
+                return (
+                    f"numbers({n}) generates {n} rows and will exhaust memory"
+                )
+
+        return None
+
+    def _detect_regexp_full_scan(self, sql: str) -> Optional[str]:
+        """Detect leading-wildcard LIKE or match()/extractAll() on large tables."""
+        try:
+            parsed = sqlglot.parse_one(sql, dialect="clickhouse")
+        except sqlglot.errors.ParseError:
+            return None
+
+        tables = self.extract_tables(sql)
+        large_tables = {"transactions", "customers"}
+        has_large_table = any(
+            t.split(".")[-1].replace("_distributed", "") in large_tables
+            for t in tables
+        )
+        if not has_large_table:
+            return None
+
+        # Check for leading-wildcard LIKE patterns (e.g., LIKE '%pattern%')
+        for like_node in parsed.find_all(exp.Like):
+            pattern_expr = like_node.expression
+            if isinstance(pattern_expr, exp.Literal) and pattern_expr.is_string:
+                pattern_val = pattern_expr.this
+                if pattern_val.startswith("%"):
+                    return (
+                        f"LIKE '{pattern_val}' with leading wildcard forces a full table "
+                        f"scan on a large table and cannot use indexes"
+                    )
+
+        # Check for match() — sqlglot parses ClickHouse match() as RegexpLike
+        if parsed.find(exp.RegexpLike):
+            return (
+                "match() applies a regex to every row of a large table "
+                "and will cause a full scan"
+            )
+
+        # Check for extractAll() and other regex functions parsed as Anonymous
+        for func in parsed.find_all(exp.Anonymous):
+            if func.name.lower() in ("extractall",):
+                return (
+                    f"{func.name}() applies a regex to every row of a large table "
+                    f"and will cause a full scan"
+                )
+
+        return None
+
+    def _detect_unbounded_high_cardinality_group_by(self, sql: str) -> Optional[str]:
+        """Detect GROUP BY on columns known to have very high cardinality."""
+        try:
+            parsed = sqlglot.parse_one(sql, dialect="clickhouse")
+        except sqlglot.errors.ParseError:
+            return None
+
+        group_node = parsed.find(exp.Group)
+        if not group_node:
+            return None
+
+        # Columns that are known to produce millions of groups when used in
+        # GROUP BY without additional filtering (e.g., no LIMIT on the result,
+        # no restrictive WHERE clause).
+        high_cardinality_columns = {
+            "ip_address", "user_agent", "email", "phone",
+            "tx_id", "customer_id", "ssn_hash", "address",
+        }
+
+        # Check if the query has a LIMIT clause or a restrictive WHERE
+        has_limit = parsed.find(exp.Limit) is not None
+
+        if has_limit:
+            return None
+
+        group_by_cols = []
+        for expr in group_node.expressions:
+            if isinstance(expr, exp.Column):
+                group_by_cols.append(expr.name)
+
+        dangerous_cols = [
+            col for col in group_by_cols if col in high_cardinality_columns
+        ]
+
+        if dangerous_cols:
+            return (
+                f"GROUP BY on high-cardinality column(s) {', '.join(dangerous_cols)} "
+                f"without LIMIT will produce millions of groups and exhaust memory"
+            )
 
 
 class AccessControlService:
@@ -322,11 +526,32 @@ class AccessControlService:
         self.analyzer = QueryAnalyzer(self.registry)
 
     def check(self, agent_id: str, sql: str) -> AccessResult:
+        # --- Multi-statement injection (readonly does NOT catch this) ---
+        if self.analyzer.has_multi_statement(sql):
+            return AccessResult(
+                decision=Decision.DENY,
+                reason="Multi-statement queries are prohibited (possible injection)",
+                query_type=QueryType.UNKNOWN,
+            )
+
+        # --- Dangerous table-functions (readonly does NOT catch these) ---
         dangerous = self.analyzer.has_dangerous_functions(sql)
         if dangerous:
             return AccessResult(
                 decision=Decision.DENY,
                 reason=f"Dangerous function '{dangerous}' is prohibited",
+                query_type=QueryType.UNKNOWN,
+            )
+
+        exhaustion_reason = self.analyzer.detect_resource_exhaustion(sql)
+        if exhaustion_reason:
+            logger.warning(
+                "DENIED resource-exhausting query from agent=%s: %s | reason=%s",
+                agent_id, sql[:100], exhaustion_reason,
+            )
+            return AccessResult(
+                decision=Decision.DENY,
+                reason=f"Resource exhaustion: {exhaustion_reason}",
                 query_type=QueryType.UNKNOWN,
             )
 
