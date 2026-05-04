@@ -131,7 +131,7 @@ The interface between data systems and their consumers is undergoing a
 structural shift. Where human analysts once formulated precise SQL queries
 informed by domain expertise and schema knowledge, LLM-powered agents now
 interact with databases through iterative, exploratory probe
-sequences~\cite{liu2025sao}. These agentic workloads differ qualitatively from
+sequences. These agentic workloads differ qualitatively from
 traditional analytics: they exhibit high \emph{scale} (hundreds of queries per
 task), substantial \emph{heterogeneity} (mixing metadata exploration with
 analytical computation), pervasive \emph{redundancy} (repeating similar
@@ -163,7 +163,7 @@ request rate with backoff signals.  Without such governance, a single
 misconfigured agent loop can degrade query latency for the entire cluster.
 
 \paragraph{Efficiency.}
-Liu \etal~\cite{liu2025sao} observe that 80--90\% of agent queries in
+Prior work~\cite{liu2025sao} observes that 80--90\% of agent queries in
 text-to-SQL benchmarks are redundant schema-exploration
 probes---\texttt{DESCRIBE TABLE}, \texttt{SHOW COLUMNS}, and speculative
 \texttt{SELECT *} queries whose sole purpose is to map the schema landscape.
@@ -238,9 +238,9 @@ benchmark tracks:
 
 \subsection{Agentic Workload Characteristics}
 
-Liu \etal~\cite{liu2025sao} analyze agent interactions with data systems on the
-BIRD benchmark~\cite{li2024bird} and multi-database tasks and identify four
-distinguishing characteristics of agentic workloads:
+Analysis of agent interactions with data systems on the
+BIRD benchmark~\cite{li2024bird,liu2025sao} and multi-database tasks
+identifies four distinguishing characteristics of agentic workloads:
 
 \begin{description}[leftmargin=*,labelwidth=1.5cm]
   \item[Scale.]
@@ -255,14 +255,13 @@ distinguishing characteristics of agentic workloads:
     Agent probes span a wide spectrum: coarse-grained metadata discovery
     (\texttt{system.columns}, \texttt{information\_schema}), partial query
     attempts that test column availability, and final analytical computation.
-    Liu \etal{} observe that agents follow overlapping phases---metadata
-    exploration, statistics gathering, and solution formulation---rather
-    than a linear pipeline.
+    Agents follow overlapping phases---metadata exploration, statistics
+    gathering, and solution formulation---rather than a linear pipeline.
 
   \item[Redundancy.]
     Across sessions and agents, many probes access similar data or perform
-    overlapping operations. Liu \etal{} find that distinct sub-plans
-    across 50~parallel agent attempts comprise less than 10--20\% of total
+    overlapping operations.  Distinct sub-plans across 50~parallel agent
+    attempts comprise less than 10--20\% of total
     work, indicating 80--90\% redundancy.  Providing semantic hints reduced
     schema-exploration queries by 14--37\% depending on the exploration phase.
 
@@ -995,8 +994,9 @@ trade-offs require careful study.
         annotation.
 
   \item \textbf{Inter-probe optimization.}
-        Liu \etal~\cite{liu2025sao} propose multi-query optimization
-        for agentic workloads~\cite{sellis1988mpo}.  The session learning
+        Multi-query optimization for agentic
+        workloads~\cite{liu2025sao,sellis1988mpo} is a promising direction.
+        The session learning
         component could be extended to precompute and cache common
         sub-expressions across agent sessions.
 
@@ -1129,8 +1129,8 @@ and efficiency of agentic database access:
         capability rather than leveling it.
 \end{itemize}
 
-These results validate the agent-first design principles proposed by
-Liu \etal~\cite{liu2025sao} and demonstrate that substantial progress
+These results validate the agent-first design
+principles~\cite{liu2025sao} and demonstrate that substantial progress
 is achievable at the middleware layer without modifying the underlying
 OLAP engine.  The middleware architecture---transparent proxy, AST-level
 inspection, embedding-based session memory---is database-agnostic by
