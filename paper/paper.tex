@@ -938,64 +938,74 @@ distinguish useful patterns from dead ends.
 
 \subsection{Limitations}
 
-\paragraph{Side-channel attacks.}
-The most significant limitation is the F grade on side-channel inference in
-both configurations. An adversary can narrow \texttt{WHERE} clauses in
-aggregate queries until the group size approaches 1, effectively recovering
-individual records despite the aggregation requirement. Defending against
-this requires either (a)~differential privacy mechanisms that add calibrated
-noise to query results, (b)~minimum group-size thresholds that reject
-aggregations over fewer than $k$ records, or (c)~query-sequence analysis
-that detects progressive refinement patterns. Each approach involves
-non-trivial privacy--utility trade-offs. \todo{Discuss which approach is
-most promising for agent workloads.}
-
-\paragraph{Token overhead with small models.}
-The 186\% token increase with Qwen-3.5 highlights a tension: intent-based
-access control provides stronger security but increases interaction complexity.
-Agents must interpret policy-violation feedback, reformulate queries to comply
-with constraints, and manage the growing context window of their conversation
-history. Smaller models struggle with this reasoning chain, producing verbose
-and repetitive reformulation attempts.
-
-This limitation is partially architectural (the middleware could pre-validate
-likely query patterns during exploration and warn agents proactively) and
-partially a function of model capability (larger models with better
-instruction-following would require fewer retries).
+\paragraph{Model capability dependence.}
+The middleware amplifies model capability rather than leveling it
+(\S\ref{sec:model-comparison}).  Qwen-3.5 achieves only 25\% accuracy
+despite full middleware support, consuming 10$\times$ more tokens than
+GPT-4o due to verbose retry loops when policy blocks are encountered.
+This is partially architectural---the middleware could pre-validate likely
+query patterns and warn agents proactively---and partially a function of
+model capability.  As the model quality dimension shows, the middleware's
+value increases with agent capability: stronger models interpret
+\texttt{aggregation\_only} annotations and formulate compliant SQL on the
+first attempt.
 
 \paragraph{Static resource registry.}
-The current resource registry requires manual column classification. In
-production, this annotation burden could be reduced through automated
-PII-detection classifiers or schema-metadata propagation from data catalogs.
-\todo{Discuss integration with existing data governance tools.}
+The current resource registry requires manual column classification via
+YAML configuration.  In production, this annotation burden could be reduced
+through automated PII-detection classifiers, schema-metadata propagation
+from enterprise data catalogs (\eg, Apache Atlas, Collibra), or inference
+from column names and sample values.  The middleware's modular design
+accommodates such extensions without architectural changes.
+
+\paragraph{Benchmark representativeness.}
+The evaluation uses a compact synthetic dataset (5~tables, 200K~rows).
+Production OLAP warehouses have hundreds of tables, deeper join hierarchies,
+and more diverse query patterns.  The rapid session-learning saturation
+observed in \S\ref{sec:saturation} would likely be more gradual on such
+systems, with the middleware providing value over a longer horizon.
+
+\paragraph{Side-channel timing attacks.}
+The middleware does not currently mitigate timing-based inference attacks.
+An adversary can progressively narrow \texttt{WHERE} clauses in aggregate
+queries (\eg, \texttt{SELECT COUNT(*) WHERE credit\_score > 700}, then
+\texttt{> 750}, then \texttt{> 775}) to infer individual values through
+latency differences.  The middleware's position as an interposition layer
+makes it the natural place to add such defenses, but the privacy--utility
+trade-offs require careful study.
 
 \subsection{Future Work}
 
 \begin{itemize}[leftmargin=*]
-  \item \textbf{Differential privacy integration.}
-        Adding calibrated noise or minimum-group-size thresholds to
-        defeat side-channel attacks while preserving analytical utility.
-
-  \item \textbf{Inter-probe optimization.}
-        Liu \etal~\cite{liu2025sao} propose multi-query optimization
-        for agentic workloads~\cite{sellis1988mpo}. The query learning
-        component could be extended to precompute and cache common
-        sub-expressions across agent sessions.
+  \item \textbf{Query cost estimation.}
+        The middleware already parses every query into a full SQL AST for
+        intent classification.  A natural extension is to estimate scan
+        cost from the AST---row counts from table statistics, join
+        cardinality from key distributions---and reject queries with
+        estimated costs above a configurable threshold \emph{before}
+        execution.  Combined with the existing resource exhaustion
+        pattern detection, this would close the remaining gap in
+        resource protection.
 
   \item \textbf{Adaptive policy feedback.}
         Tailoring the verbosity and specificity of policy-violation
-        explanations to the agent's demonstrated capability level,
-        reducing token overhead for weaker models.
+        explanations to the agent's demonstrated capability level.
+        A weak model might receive in-context examples of compliant
+        query rewrites, while a strong model receives only the column
+        annotation.
 
-  \item \textbf{Larger model evaluation.}
-        Benchmarking token overhead with GPT-4o, Claude, and Llama-3
-        70B to characterize the relationship between model capability
-        and access-control-induced retry costs.
+  \item \textbf{Inter-probe optimization.}
+        Liu \etal~\cite{liu2025sao} propose multi-query optimization
+        for agentic workloads~\cite{sellis1988mpo}.  The session learning
+        component could be extended to precompute and cache common
+        sub-expressions across agent sessions.
 
-  \item \textbf{Multi-database support.}
-        Extending the proxy layer to support PostgreSQL, DuckDB, and
-        other OLAP backends via \texttt{sqlglot}'s transpilation
-        capabilities.
+  \item \textbf{Side-channel defenses.}
+        Integrating differential privacy mechanisms (calibrated noise on
+        aggregate results) or minimum group-size thresholds into the
+        access control pipeline.  The middleware already inspects every
+        query at the AST level, making it the natural enforcement point
+        for such defenses.
 \end{itemize}
 
 
@@ -1008,55 +1018,75 @@ PII-detection classifiers or schema-metadata propagation from data catalogs.
 \paragraph{Agent-first data systems.}
 Liu \etal~\cite{liu2025sao} provide the foundational analysis of agentic
 workloads and propose an agent-first data systems architecture addressing
-query interfaces, probe optimization, indexing, and storage. \sysname
-contributes a concrete middleware implementation that addresses three of
+query interfaces, probe optimization, indexing, and storage.  \sysname
+contributes a concrete middleware implementation that addresses four of
 their identified research directions: supporting exploration (via the
-explore endpoint), query optimization (via session-based learning), and
-access control (via intent classification). Our work complements their
-architectural vision by demonstrating that significant improvements are
-achievable at the middleware layer without modifying the underlying OLAP
-engine.
+explore endpoint), reducing redundancy (via session-based learning),
+access control (via intent classification), and steerability (via
+structured policy feedback).  This work complements their architectural
+vision by demonstrating that significant improvements are achievable at
+the middleware layer without modifying the underlying OLAP engine.
 
 \paragraph{Text-to-SQL.}
 The text-to-SQL literature~\cite{yu2018spider,li2024bird,pourreza2024dinsql}
-focuses on the accuracy of translating natural language to SQL. These systems
+focuses on the accuracy of translating natural language to SQL.  These systems
 are complementary to \sysname: they generate queries that then flow through
-our middleware for access control and learning. Our work addresses the
+the middleware for access control and learning.  \sysname addresses the
 orthogonal challenges of security and efficiency that arise \emph{after}
-query generation.
+query generation---a text-to-SQL system producing perfect SQL still needs
+intent-based access control and schema context.
 
 \paragraph{Database access control.}
-RBAC~\cite{sandhu1996rbac} and query-rewriting approaches~\cite{rizvi2004extending}
-enforce access at the row or column level. \sysname extends this with
-intent-based classification, distinguishing aggregation from row-level access
-over the same column. The closest work is
-\todo{identify most relevant fine-grained access control paper for SQL},
-which \todo{describe how it differs from our approach}.
+RBAC~\cite{sandhu1996rbac} and query-rewriting
+approaches~\cite{rizvi2004extending} enforce access at the row or column
+level.  \sysname extends this with intent-based classification,
+distinguishing aggregation from row-level access over the same column.
+The key difference is \emph{granularity of intent}: traditional systems
+answer ``can this principal access this column?'' while \sysname answers
+``what does this principal intend to do with this column, and is that
+intent permitted?''  This distinction is critical for agentic workloads
+where the same column legitimately appears in both aggregation and
+row-level queries.
 
 \paragraph{LLM guardrails.}
 NeMo Guardrails~\cite{rebedea2023nemo} and similar frameworks enforce safety
-constraints at the prompt level. These operate upstream of query
-generation and cannot inspect the SQL that agents produce. \sysname operates
-downstream, inspecting and enforcing policies on the actual queries sent to the
-database. The two approaches are complementary: guardrails constrain what agents
-\emph{ask for}, while \sysname constrains what agents \emph{actually access}.
+constraints at the prompt level, filtering natural-language inputs before
+they reach the model.  These operate upstream of query generation and cannot
+inspect the SQL that agents produce.  \sysname operates downstream,
+inspecting and enforcing policies on the actual queries sent to the
+database.  The two approaches are complementary: guardrails constrain what
+agents \emph{ask for}, while \sysname constrains what agents
+\emph{actually access}.  The security benchmark demonstrates that this
+downstream inspection catches vectors that upstream guardrails miss---
+table-function abuse (\texttt{url()}, \texttt{s3()}), system-table
+information leakage, and multi-statement injection.
 
 \paragraph{Semantic caching.}
-Semantic caching~\cite{dar1996semantic} stores query results indexed by their
-semantic content, enabling cache hits for queries with overlapping predicates.
-\sysname's session-based learning is related but distinct: rather than caching
-results, it caches \emph{query patterns and relevance signals}, enabling
-knowledge transfer at the strategic rather than operational level.
+Semantic caching~\cite{dar1996semantic} stores query results indexed by
+their semantic content, enabling cache hits for queries with overlapping
+predicates.  \sysname's session-based learning is related but distinct:
+rather than caching results, it caches \emph{query patterns and relevance
+signals}, enabling knowledge transfer at the strategic rather than
+operational level.  The cross-task transfer experiment
+(\S\ref{sec:cross-task}) demonstrates that this approach works across
+different analytical questions sharing underlying tables.
 
-\paragraph{Data discovery.}
+\paragraph{Data discovery and metadata management.}
 Systems like Aurum~\cite{fernandez2018aurum} help users discover relevant
-datasets and relationships. \sysname's explore endpoint serves a similar
-purpose for agents, but is specifically designed for programmatic consumption
-with access-controlled metadata, statistics, and join recommendations in a
-structured format.
+datasets and relationships.  \sysname's explore endpoint serves a similar
+purpose for agents, but adds two critical features: \emph{access-level
+annotations} that teach agents how to formulate policy-compliant queries,
+and \emph{access filtering} that omits tables and columns the agent
+cannot use, reducing both the attack surface and the agent's schema
+confusion.
 
-\todo{Add references to recent agent-database interaction papers from
-2024--2025.}
+\paragraph{Agent tool use and reasoning.}
+ReAct~\cite{yao2023react} and Toolformer~\cite{schick2024toolformer}
+establish the paradigm of LLM agents interacting with external tools
+through iterative reasoning and action.  \sysname provides the data-system
+side of this interaction---structured interfaces (explore, session
+learning) that are designed for programmatic consumption by reasoning
+agents rather than human analysts.
 
 
 % =====================================================================
@@ -1066,33 +1096,51 @@ structured format.
 \label{sec:conclusion}
 
 As LLM agents become primary consumers of analytical data systems, the
-interface between agents and databases requires fundamental rethinking. We
-presented \sysname, a transparent middleware layer that introduces
-intent-based access control, session-based query learning, and curated schema
-discovery for OLAP systems.
+interface between agents and databases requires fundamental rethinking.
+This work presented \sysname, a transparent middleware layer that introduces
+intent-based access control, session-based query learning, curated schema
+discovery, and agent resource governance for OLAP systems.
 
-Our evaluation demonstrates that middleware-level interventions can
-significantly improve both the security and efficiency of agentic database
-access. The intent-based access control reduces PII leakage from 300 rows to 0
-while permitting legitimate aggregate analytics. The explore endpoint
-eliminates all schema-exploration queries, reducing total query volume by
-49\%. These results validate the agent-first design principles proposed by
-Liu \etal~\cite{liu2025sao} and demonstrate that substantial progress is
-achievable without modifying the underlying OLAP engine.
+The evaluation on a distributed ClickHouse cluster demonstrates that
+middleware-level interventions can significantly improve both the security
+and efficiency of agentic database access:
 
-The token overhead observed with small models (186\% increase) underscores
-that agent-first middleware must co-evolve with agent capabilities. As models
-improve at interpreting structured feedback and generating policy-compliant
-queries, we expect the security benefits to be realized without efficiency
-costs.
+\begin{itemize}[leftmargin=*]
+  \item The security benchmark shows a 4$\times$ increase in attack
+        blocking (13\%$\to$53\% of 201~probes), with PII leakage eliminated
+        entirely, resource exhaustion detection at 85\%, and query injection
+        at 100\%---including vectors that ClickHouse's \texttt{readonly}
+        mode does not catch.
 
-\todo{Finalize conclusion once all experimental results are confirmed.}
+  \item The agent efficiency benchmark reduces OLAP queries by 74.5\%
+        (200$\to$51) and eliminates all 95~schema-exploration queries.
+        The explore endpoint is the foundational enabler: without it,
+        task success drops from 100\% to 12.5\%.
+
+  \item Cross-task knowledge transfer reduces queries by 90\% for
+        semantically related tasks, and session learning saturates at
+        $K{=}6$ similar queries after approximately 7~agents.
+
+  \item Model capability determines how effectively agents leverage the
+        middleware: GPT-4o achieves 62.5\% accuracy in 1.1~queries,
+        GPT-4o-mini 45.8\% in 3.5~queries, and Qwen-3.5 25\% in
+        5.7~queries---confirming that the middleware amplifies model
+        capability rather than leveling it.
+\end{itemize}
+
+These results validate the agent-first design principles proposed by
+Liu \etal~\cite{liu2025sao} and demonstrate that substantial progress
+is achievable at the middleware layer without modifying the underlying
+OLAP engine.  The middleware architecture---transparent proxy, AST-level
+inspection, embedding-based session memory---is database-agnostic by
+design and extensible to other OLAP backends.
 
 % =====================================================================
 % ACKNOWLEDGMENTS
 % =====================================================================
 \begin{acks}
-\todo{Add acknowledgments: advisors, compute resources, funding, etc.}
+The author thanks Bloomberg for providing the compute infrastructure
+and engineering environment used in this work.
 \end{acks}
 
 % =====================================================================
@@ -1100,30 +1148,5 @@ costs.
 % =====================================================================
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
-
-% =====================================================================
-% APPENDIX (optional)
-% =====================================================================
-\appendix
-
-\section{Detailed Benchmark Configuration}
-\label{app:benchmark}
-
-\todo{Add detailed benchmark configuration: hardware specs, ClickHouse
-version, dataset schema, Qwen-3.5 inference parameters (temperature,
-max tokens, system prompt), number of retry attempts permitted, etc.}
-
-\section{Full Security Probe Catalog}
-\label{app:probes}
-
-\todo{Add the full catalog of 200 security probes across 5 attack
-categories, with expected and actual outcomes.}
-
-\section{Sample Policy Violation Feedback}
-\label{app:feedback}
-
-\todo{Add side-by-side examples of baseline ClickHouse errors vs.
-\sysname structured policy-violation feedback, showing how agents
-use the feedback to reformulate queries.}
 
 \end{document}
