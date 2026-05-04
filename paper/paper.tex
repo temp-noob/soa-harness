@@ -1018,14 +1018,15 @@ trade-offs require careful study.
 \paragraph{Agent-first data systems.}
 Liu \etal~\cite{liu2025sao} provide the foundational analysis of agentic
 workloads and propose an agent-first data systems architecture addressing
-query interfaces, probe optimization, indexing, and storage.  \sysname
-contributes a concrete middleware implementation that addresses four of
-their identified research directions: supporting exploration (via the
-explore endpoint), reducing redundancy (via session-based learning),
-access control (via intent classification), and steerability (via
-structured policy feedback).  This work complements their architectural
-vision by demonstrating that significant improvements are achievable at
-the middleware layer without modifying the underlying OLAP engine.
+query interfaces, probe optimization, indexing, and storage.  This work
+takes inspiration from their characterization of agentic workloads and
+develops a benchmark harness and middleware prototype to explore how such
+an architecture might help in practice.  The evaluation carves out
+measurable dimensions---security posture, query efficiency, explore
+ablation, cross-task transfer, session saturation, model scaling, and
+feedback efficacy (\S\ref{sec:eval})---to assess where middleware-level
+interventions provide the most value without modifying the underlying
+OLAP engine.
 
 \paragraph{Text-to-SQL.}
 The text-to-SQL literature~\cite{yu2018spider,li2024bird,pourreza2024dinsql}
@@ -1134,14 +1135,6 @@ is achievable at the middleware layer without modifying the underlying
 OLAP engine.  The middleware architecture---transparent proxy, AST-level
 inspection, embedding-based session memory---is database-agnostic by
 design and extensible to other OLAP backends.
-
-% =====================================================================
-% ACKNOWLEDGMENTS
-% =====================================================================
-\begin{acks}
-The author thanks Bloomberg for providing the compute infrastructure
-and engineering environment used in this work.
-\end{acks}
 
 % =====================================================================
 % REFERENCES
